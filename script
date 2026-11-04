@@ -1,0 +1,3825 @@
+--============================================================================
+--  ATTACK ON TITAN REVOLUTION  |  DELTA AUTO-FARM  |  Vega UI
+--  place 14638336319            build 2026-11-04            version 3.0
+--============================================================================
+--  WHAT THIS IS
+--    A Nape extender + titan auto-farm + gas refill + results-screen retry,
+--    driven entirely through the Vega UI in vega_ui.lua. It is written for the
+--    Delta Android executor: real Instances for the menu (no Drawing), and the
+--    proven client-side movement from the earlier AOTR recon in this repo.
+--
+--  v3.0 ADDS (all optional, all off unless noted)
+--    Round automation : auto start missions / raids / waves / mastery,
+--                       raid type rotation, hardest available difficulty,
+--                       modifier clicking, boss-skin rejoin, solo mode.
+--    Movement         : tween travel (default, anti-cheat friendly), hover and
+--                       teleport modes, stuck detector, auto rejoin.
+--    Combat           : cluster targeting for group hits, auto skills, auto
+--                       escape, infinite spear ammo, auto reload.
+--    Progression      : skill-tree unlocker, perk equip / enhance / sell,
+--                       slot select, prestige, boosts, crates, achievements.
+--    Family           : roll / store with a Mythical webhook.
+--    Webhooks         : rewards, mission completions, lifetime stats.
+--    Visuals          : 3D rendering off, performance mode, fog removal,
+--                       auto-hide menu.
+--    Safety           : shadow-ban heuristic, stuck fail-safe, auto-execute.
+--
+--  GAME-UI AUTOMATION AND WHAT IT MEANS
+--    AOTR's menus are not part of the measured recon below, so every button is
+--    found by NAME OR TEXT with a broad alias list, inside the panel named by
+--    the matching word (Raids, Modifiers, Perks...). If this game build renames
+--    a button, that one action reports "button not found" and nothing else
+--    breaks. Tools -> Dump UI prints every visible button and label so one
+--    rename can be handled in seconds (edit the alias lists in GuiAuto).
+--
+--  HOW TO RUN (Delta, Android)
+--    0. Easiest: paste aotr_delta_bundle.lua on its own. It is this same build
+--       with Vega embedded, so it needs no second file, readfile or loadstring.
+--    1. Two-file route: put vega_ui.lua and aotr_delta_farm.lua in Delta's file
+--       workspace (Files -> Import, both files, same folder).
+--    2. Execute aotr_delta_farm.lua. It reads vega_ui.lua from the same folder.
+--       If that lookup fails, run vega_ui.lua first and then this script: it
+--       reuses getgenv().Vega.
+--    3. The menu opens on its own. Tap Start farming (or press F5). During a
+--       run the menu collapses to a 46px title bar at the top-left: tap its "-"
+--       to reopen it, then Stop. F5 still stops from a keyboard.
+--
+--  WHAT WAS MEASURED IN THIS GAME (not assumed)
+--    * workspace.Titans holds the models. Each has HumanoidRootPart and
+--      Hitboxes.Hit.Nape. The nape is a plain Part welded to the titan.
+--    * Nape .Size writes stick. Nape .Position is reverted by the weld within a
+--      frame, so the magnet re-asserts it EVERY frame; most frames it holds.
+--    * Our own HumanoidRootPart accepts .Position / .CFrame, so hovering is a
+--      repeated write plus zeroed AssemblyLinearVelocity.
+--    * A nape hit DELETES the titan. Humanoid health therefore never shows the
+--      kill, so kills are counted from the player's own Stat attribute.
+--    * The farm loop that produced 4 kills in 6 seconds was exactly: hover
+--      above the titan, pull the nape onto the player, aim, mouse1click.
+--    * Gas: Unclimbable.Camps.Camp.GasTanks.Refill is the camp tank. R only
+--      refills while the character is standing on it. Gas percentage is read
+--      from PlayerGui.Interface.HUD.Main.Top...Gas.Percentage.
+--    * Blades: Rig_<player>.LeftHand/RightHand.Blade_1..7, Transparency == 1
+--      means broken.
+--    * Results: Interface.Rewards.Main.Info.State reads COMPLETED / FAILED.
+--      Rewards buttons are in the order Leave_2, Modify, Retry, so the game's
+--      own key navigation is backslash, D, D, Enter. This build fires the
+--      Retry button through getconnections first and only falls back to keys.
+--
+--  WHAT THIS DELIBERATELY DOES NOT DO
+--    * No hookfunction / metamethod hooks. Every update to this game moves
+--      client code, and a hook is the first thing that breaks. The executor
+--      functions that ARE used are optional and probed one by one:
+--      getconnections + firesignal + isexecutorclosure (fire the real Retry
+--      button, skipping our own connection), fireproximityprompt and
+--      firetouchinterest (refill without a keyboard), mouse1click /
+--      mouse1press + mouse1release (attack), keypress + keyrelease (R), and
+--      setrobloxinput when present. Missing ones fall back or disable exactly
+--      one path; the menu and farm keep working.
+--    * No remote / teleport spam. Titans are server-owned; the farm moves YOU.
+--    * No auto-leave. If a round cannot be retried, the status line says so.
+--
+--  API (from the executor console)
+--    _G.AOTR_DELTA.start()      start the loops
+--    _G.AOTR_DELTA.stop()       stop the loops and release input
+--    _G.AOTR_DELTA.toggle()
+--    _G.AOTR_DELTA.restore()    put every remembered nape size back
+--    _G.AOTR_DELTA.retry()      press the results screen Retry now
+--    _G.AOTR_DELTA.selftest()   print PASS / FAIL / INFO for every path
+--    _G.AOTR_DELTA.status()     one-line state
+--    _G.AOTR_DELTA.cfg          live table; edit any field while it runs
+--    _G.AOTR_DELTA.stats        lifetime counters (saved to Vega/aotr_stats.json)
+--    _G.AOTR_DELTA.rejoin()     teleport back into the place
+--    _G.AOTR_DELTA.dumpUI()     print every visible button / label
+--    _G.AOTR_DELTA.installAutoExec()  write the Delta autoexec loader
+--    _G.AOTR_DELTA.destroy()    stop, restore, unload the menu
+--
+--  SAFETY
+--    F5 farm on/off, F6 nape extender, F7 panic (stop + restore + park).
+--    Panic and Stop both release mouse buttons and R / Space / W. Stop does
+--    not restore nape sizes; Restore napes does. Rejoining does not need a
+--    restore: the old parts are gone and the next round starts at stock size.
+--============================================================================
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+local lp = Players.LocalPlayer
+local PLACE = 14638336319
+local VERSION = "3.0"
+
+--============================================================================
+--  RE-RUN CLEANUP
+--============================================================================
+local genv = (type(getgenv) == "function" and getgenv()) or _G
+local previous = genv.AOTR_DELTA
+if type(previous) == "table" then
+	pcall(function() previous.stop() end)
+	pcall(function() previous.restore() end)
+	if previous.ui and type(previous.ui.Destroy) == "function" then
+		pcall(function() previous.ui:Destroy() end)
+	end
+end
+
+--============================================================================
+--  EXECUTOR SURFACE (every entry is optional)
+--============================================================================
+--  Reading an undefined global is nil in Luau, so this table is also the
+--  capability report. Nothing below assumes an entry exists.
+local api = {
+	mouse1click = type(mouse1click) == "function" and mouse1click or nil,
+	mouse1press = type(mouse1press) == "function" and mouse1press or nil,
+	mouse1release = type(mouse1release) == "function" and mouse1release or nil,
+	mouse2click = type(mouse2click) == "function" and mouse2click or nil,
+	keypress = type(keypress) == "function" and keypress or nil,
+	keyrelease = type(keyrelease) == "function" and keyrelease or nil,
+	getconnections = type(getconnections) == "function" and getconnections or nil,
+	firesignal = type(firesignal) == "function" and firesignal or nil,
+	isexecutorclosure = type(isexecutorclosure) == "function" and isexecutorclosure or nil,
+	hookfunction = type(hookfunction) == "function" and hookfunction or nil,
+	fireproximityprompt = type(fireproximityprompt) == "function" and fireproximityprompt or nil,
+	firetouchinterest = type(firetouchinterest) == "function" and firetouchinterest or nil,
+	isrbxactive = type(isrbxactive) == "function" and isrbxactive or nil,
+	setrobloxinput = type(setrobloxinput) == "function" and setrobloxinput or nil,
+	readfile = type(readfile) == "function" and readfile or nil,
+	writefile = type(writefile) == "function" and writefile or nil,
+	loadstring = type(loadstring) == "function" and loadstring or nil,
+	makefolder = type(makefolder) == "function" and makefolder or nil,
+	isfolder = type(isfolder) == "function" and isfolder or nil,
+	queue_on_teleport = type(queue_on_teleport) == "function" and queue_on_teleport or nil,
+	gethui = type(gethui) == "function" and gethui or nil,
+	setfpscap = type(setfpscap) == "function" and setfpscap or nil,
+	getfpscap = type(getfpscap) == "function" and getfpscap or nil,
+}
+
+--============================================================================
+--  VEGA UI
+--============================================================================
+local function loadVega()
+	local existing = genv.Vega
+	if type(existing) == "table" and type(existing.CreateWindow) == "function" then
+		return existing, "getgenv"
+	end
+	if not api.readfile then
+		error("Delta has no readfile; run vega_ui.lua first, then this script", 0)
+	end
+	local candidates = {
+		"vega_ui.lua", "vega_ui.luau",
+		"Vega/vega_ui.lua", "Vega/vega_ui.luau",
+		"Scripts/vega_ui.lua",
+	}
+	local lastError = "vega_ui.lua not found in the executor workspace"
+	for _, path in ipairs(candidates) do
+		local ok, src = pcall(api.readfile, path)
+		if ok and type(src) == "string" and #src > 200 then
+			if not api.loadstring then
+				error("Delta has no loadstring; run vega_ui.lua first, then this script", 0)
+			end
+			local chunk, compileError = api.loadstring(src, "@" .. path)
+			if not chunk then
+				lastError = path .. ": " .. tostring(compileError)
+			else
+				local ran, lib = pcall(chunk)
+				if ran and type(lib) == "table" and type(lib.CreateWindow) == "function" then
+					genv.Vega = lib
+					return lib, path
+				end
+				lastError = path .. ": " .. tostring(lib)
+			end
+		end
+	end
+	error("Could not load Vega UI (" .. lastError .. "). Put vega_ui.lua next to this script, or run vega_ui.lua first.", 0)
+end
+
+local okVega, Vega, vegaFrom = pcall(loadVega)
+if not okVega then
+	warn("[AOTR-Delta] " .. tostring(Vega))
+	return
+end
+print("[AOTR-Delta] Vega UI loaded from " .. tostring(vegaFrom))
+
+--============================================================================
+--  CONFIG + STATE
+--============================================================================
+local cfg = {
+	-- master
+	autoFarm = false,
+	napeEnabled = true,
+	magnet = true,
+	pressSpace = true,            -- the measured loop tapped M1 + Space together
+	refill = true,
+	autoRetry = true,
+	focusGuard = true,
+	uiGuard = true,
+	-- targeting
+	priority = "nearest",          -- nearest | attack | hp
+	refillMethod = "auto",         -- auto | key | prompt | touch
+	-- approach
+	hover = 120,
+	hoverAttack = 160,
+	hoverBig = 200,
+	hoverClose = 14,               -- used when the magnet is off
+	bobAmp = 2,
+	bobHz = 1.5,
+	attackHz = 10,
+	magnetSize = 12,
+	magnetY = 2,
+	napeMult = 4,
+	napeRange = 900,
+	tick = 0.03,
+	-- refill
+	refillGas = 25,
+	refillTries = 5,
+	refillCooldown = 12,
+	-- retry
+	retryCooldown = 25,
+	retryMax = 0,                  -- 0 = keep retrying every round
+	retryRight = 0x44,             -- D, the game's "right" on the results screen
+
+	-- v3 automation ---------------------------------------------------------
+	autoStartMode = "none",       -- none | mission | raid | wave | mastery
+	raidTypes = { "Attack", "Armored", "Female", "Colossal" },
+	raidRotate = true,
+	difficulty = "Hardest",       -- Easy | Normal | Hard | Aberrant | Freedom
+	masteryTitan = "",            -- only target titans whose name contains this | Hardest
+	autoModifiers = false,
+	modifierExclude = "",          -- comma list of modifier names to leave off
+	autoRejoinBoss = false,
+	bossSkin = "",                -- the skin name to watch for on the results screen
+	soloOnly = false,
+	soloAction = "pause",         -- pause | hop
+	autoHideGui = false,
+
+	-- movement --------------------------------------------------------------
+	moveMode = "tween",           -- tween | hover | teleport
+	travelSpeed = 220,            -- studs per second while tweening
+	travelNear = 90,              -- closer than this, the combat hover takes over
+
+	-- combat ----------------------------------------------------------------
+	multiHit = true,
+	multiRadius = 22,
+	multiMin = 3,
+	autoSkills = false,
+	skillKeys = "Q,E,F,G,C,V,X,Z",
+	skillDelay = 0.6,
+	autoEscape = true,
+	infiniteSpears = false,
+	autoReload = true,
+
+	-- progression -----------------------------------------------------------
+	autoSkillTree = false,
+	skillPriority = "",           -- comma list of node names to unlock first
+	autoEquipPerks = false,
+	enhancePerks = false,
+	enhanceAllPerks = false,
+	sellPerks = "",               -- comma list; empty never sells anything
+	autoSlot = 0,                 -- 0 = off, 1..6
+	autoPrestige = false,
+	autoBoosts = false,
+	boostNames = "",              -- empty = every boost card found
+	buyBoosts = false,
+	autoCrates = false,
+	autoAchievements = false,
+
+	-- family ----------------------------------------------------------------
+	autoFamily = false,
+	familyTargets = "",           -- empty = any Mythical
+	storeFamily = true,
+	familyMinCoins = 0,
+	mythicalWebhook = true,
+
+	-- visuals ---------------------------------------------------------------
+	disable3D = false,
+	performance = false,
+	removeFog = false,
+
+	-- network ---------------------------------------------------------------
+	webhookRewards = "",
+	webhookMythical = "",
+	webhookStats = "",
+	statsInterval = 300,          -- seconds between lifetime-stat webhooks (0 = off)
+
+	-- safety ----------------------------------------------------------------
+	stuckDetect = true,
+	stuckTime = 5,
+	autoRejoinStuck = false,
+	shadowCheck = false,
+	autoExec = false,
+	scriptPath = "aotr_delta_farm.lua",
+}
+
+local UI = { win = nil, ready = false }
+local refreshStatus, syncFarmToggle
+-- forward declarations: these are defined in the v3 module block below, but
+-- refillTick / fastTick (defined earlier in the file) call them.
+local Move
+local resultHook
+local rejoinNow
+
+local S = {
+	running = false,
+	state = "idle",
+	swings = 0,
+	kills = 0,
+	rate = 0,
+	alive = 0,
+	napeParts = 0,
+	gas = nil,
+	refills = nil,
+	target = nil,
+	dist = nil,
+	err = nil,
+	results = false,
+	refilling = false,
+	aimTick = 0,
+	uiHold = 0,
+
+	-- v3 ---------------------------------------------------------------
+	travelling = false,
+	cluster = 0,
+	resultText = "",
+	resultState = nil,
+	resultSeenSig = nil,
+	soloBlocked = false,
+	stuckCount = 0,
+	slotDone = false,
+	familyRarity = nil,
+	familyName = nil,
+	familyLast = nil,
+	autoMsg = nil,
+	shadow = nil,
+	shadowAt = 0,
+	raidIndex = 1,
+	autoNext = 0,
+	autoStarts = 0,
+	joinedAt = os.time(),
+}
+
+local function clock()
+	return os.clock()
+end
+
+local function say(...)
+	print("[AOTR-Delta]", ...)
+end
+
+--============================================================================
+--  BASICS
+--============================================================================
+local function myChar()
+	local char = lp.Character
+	if not char then return nil, nil, nil end
+	return char, char:FindFirstChild("HumanoidRootPart"), char:FindFirstChildOfClass("Humanoid")
+end
+
+local function focused()
+	if not api.isrbxactive then return true end
+	local ok, active = pcall(api.isrbxactive)
+	if ok then return active == true end
+	return true
+end
+
+local function releaseAll()
+	if api.mouse1release then pcall(api.mouse1release) end
+	if api.keyrelease then
+		pcall(api.keyrelease, 0x52) -- R
+		pcall(api.keyrelease, 0x20) -- Space
+		pcall(api.keyrelease, 0x57) -- W
+	end
+end
+
+local function click()
+	if api.mouse1click then
+		pcall(api.mouse1click)
+		return true
+	elseif api.mouse1press and api.mouse1release then
+		pcall(api.mouse1press)
+		task.delay(0.04, function()
+			pcall(api.mouse1release)
+		end)
+		return true
+	end
+	return false
+end
+
+-- the refill tank, cached; re-checked by Parent on every use
+local refillObject = nil
+
+local function refillPart()
+	if refillObject and refillObject.Parent then return refillObject end
+	refillObject = nil
+	local unclimbable = workspace:FindFirstChild("Unclimbable")
+	if not unclimbable then return nil end
+	local camps = unclimbable:FindFirstChild("Camps")
+	local camp = camps and camps:FindFirstChild("Camp")
+	local tanks = camp and camp:FindFirstChild("GasTanks")
+	local part = tanks and tanks:FindFirstChild("Refill")
+	if part and part:IsA("BasePart") then
+		refillObject = part
+		return part
+	end
+	-- other maps name the camp differently: scan once, then cache the part
+	for _, descendant in ipairs(unclimbable:GetDescendants()) do
+		if descendant.Name == "Refill" and descendant:IsA("BasePart") then
+			refillObject = descendant
+			return descendant
+		end
+	end
+	return nil
+end
+
+local function safeSpot()
+	local part = refillPart()
+	if part then return part.Position + Vector3.new(0, 3, 0) end
+	local spawn = workspace:FindFirstChild("SpawnLocation")
+	if spawn and spawn:IsA("BasePart") then return spawn.Position + Vector3.new(0, 6, 0) end
+	return nil
+end
+
+--============================================================================
+--  TITAN DATA
+--============================================================================
+local function napeOf(model)
+	local hitboxes = model:FindFirstChild("Hitboxes")
+	local hit = hitboxes and hitboxes:FindFirstChild("Hit")
+	return hit and hit:FindFirstChild("Nape") or nil
+end
+
+local function hpOf(model)
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	return humanoid and humanoid.Health or -1
+end
+
+local function dead(model)
+	if model == nil or model.Parent == nil then return true end
+	local ok, flag = pcall(function() return model:GetAttribute("Dead") end)
+	if ok and flag == true then return true end
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return true end
+	return humanoid.Health <= 0
+end
+
+local function attackTitan()
+	local folder = workspace:FindFirstChild("Titans")
+	local titan = folder and folder:FindFirstChild("Attack_Titan")
+	if titan and titan.Parent and not dead(titan) then return titan end
+	return nil
+end
+
+local function roaring(titan)
+	if not titan then return false end
+	local ok, value = pcall(function() return titan:GetAttribute("Attack") end)
+	return ok and value == "Roar"
+end
+
+-- How many living titans have a nape inside cfg.multiRadius of this one. The
+-- group-hit farm aims at the middle of a crowd instead of the closest titan:
+-- one swing then lands on several napes at once.
+local function clusterCentre(model)
+	local probe = napeOf(model)
+	if not probe then return nil end
+	local okPos, centre = pcall(function() return probe.Position end)
+	if not okPos or not centre then return nil end
+	local folder = workspace:FindFirstChild("Titans")
+	if not folder then return nil end
+	local sum, count = Vector3.new(0, 0, 0), 0
+	for _, other in ipairs(folder:GetChildren()) do
+		if other:IsA("Model") and other ~= model and not dead(other) then
+			local nape = napeOf(other)
+			if nape then
+				local ok, pos = pcall(function() return nape.Position end)
+				if ok and pos and (pos - centre).Magnitude <= cfg.multiRadius then
+					sum = sum + pos
+					count = count + 1
+				end
+			end
+		end
+	end
+	if count == 0 then return centre end
+	return Vector3.new(sum.X / (count + 1), sum.Y / (count + 1), sum.Z / (count + 1))
+end
+
+local function clusterAt(model, origin)
+	local probe = napeOf(model)
+	if not probe then return 0 end
+	local okPos, centre = pcall(function() return probe.Position end)
+	if not okPos or not centre then return 0 end
+	local folder = workspace:FindFirstChild("Titans")
+	if not folder then return 0 end
+	local count = 0
+	for _, other in ipairs(folder:GetChildren()) do
+		if other:IsA("Model") and other ~= model and not dead(other) then
+			local nape = napeOf(other)
+			if nape then
+				local ok, pos = pcall(function() return nape.Position end)
+				if ok and pos and (pos - centre).Magnitude <= cfg.multiRadius then
+					count = count + 1
+				end
+			end
+		end
+	end
+	return count
+end
+
+-- nearest | attack (Attack Titan first) | hp (lowest health first)
+local function chooseTarget()
+	local folder = workspace:FindFirstChild("Titans")
+	local _, root = myChar()
+	if not folder or not root then return nil end
+	local origin = root.Position
+	local boss = attackTitan()
+
+	if boss and not roaring(boss) and cfg.priority ~= "hp" and cfg.masteryTitan == "" then
+		local nape = napeOf(boss)
+		local hrp = boss:FindFirstChild("HumanoidRootPart")
+		if nape and hrp then
+			return { model = boss, nape = nape, name = boss.Name, dist = (hrp.Position - origin).Magnitude }
+		end
+	end
+
+	local best, bestScore = nil, nil
+	for _, model in ipairs(folder:GetChildren()) do
+		if model:IsA("Model") and not dead(model) and not (model == boss and roaring(model)) then
+			local nape = napeOf(model)
+			local hrp = model:FindFirstChild("HumanoidRootPart")
+			if nape and hrp then
+				local distance = (hrp.Position - origin).Magnitude
+				local score = distance
+				if cfg.priority == "hp" then score = hpOf(model) * 10000 + distance end
+				-- mastery farm: everything that is not the wanted titan sinks
+				if cfg.masteryTitan ~= "" then
+					if not string.find(string.lower(tostring(model.Name)), string.lower(cfg.masteryTitan), 1, true) then
+						score = score + 1000000
+					end
+				end
+				-- group mode: only a crowd at least multiMin deep is worth a detour
+				if cfg.multiHit then
+					local crowd = clusterAt(model, origin)
+					if crowd >= cfg.multiMin then score = score - crowd * 1000 end
+				end
+				if bestScore == nil or score < bestScore then
+					bestScore = score
+					best = { model = model, nape = nape, name = model.Name, dist = distance }
+				end
+			end
+		end
+	end
+	return best
+end
+
+--============================================================================
+--  NAPE EXTENDER + MAGNET
+--============================================================================
+local napeStock = {}   -- [Part] = { size = Vector3 }
+
+local function applyNapes()
+	if not cfg.napeEnabled then
+		S.napeParts = 0
+		return 0
+	end
+	local folder = workspace:FindFirstChild("Titans")
+	local _, root = myChar()
+	if not folder or not root then return 0 end
+	local origin = root.Position
+	local grown = 0
+
+	for _, model in ipairs(folder:GetChildren()) do
+		if model:IsA("Model") then
+			local hrp = model:FindFirstChild("HumanoidRootPart")
+			-- the magnet owns the target's nape while it is on, size included
+			local isTarget = cfg.magnet and S.target ~= nil and S.target.model == model
+			if hrp and isTarget then
+				-- the magnet owns this nape, size included, but it is still grown:
+				-- count it so the status line matches what is on screen
+				grown = grown + 1
+			elseif hrp then
+				local ok, near = pcall(function()
+					return (hrp.Position - origin).Magnitude <= cfg.napeRange
+				end)
+				if ok and near then
+					local nape = napeOf(model)
+					if nape then
+						local entry = napeStock[nape]
+						if not entry then
+							entry = { size = nape.Size }
+							napeStock[nape] = entry
+						end
+						local want = entry.size * cfg.napeMult
+						if (nape.Size - want).Magnitude > 0.05 then
+							pcall(function() nape.Size = want end)
+						end
+						grown = grown + 1
+					end
+				end
+			end
+		end
+	end
+	S.napeParts = grown
+	return grown
+end
+
+local function restoreNapes()
+	local restored = 0
+	for part, entry in pairs(napeStock) do
+		if part and part.Parent then
+			if pcall(function() part.Size = entry.size end) then restored = restored + 1 end
+		end
+		napeStock[part] = nil
+	end
+	S.napeParts = 0
+	return restored
+end
+
+local function pruneNapes()
+	for part in pairs(napeStock) do
+		if part == nil or part.Parent == nil then napeStock[part] = nil end
+	end
+end
+
+local function magnetTick(target, root)
+	if not cfg.magnet then return end
+	local nape = target.nape
+	if not nape or not nape.Parent then
+		target.nape = napeOf(target.model)
+		nape = target.nape
+	end
+	if not nape then return end
+	-- Remember the stock size before the magnet changes it, so Restore napes
+	-- also resets the titan that happened to be the current target.
+	if not napeStock[nape] then napeStock[nape] = { size = nape.Size } end
+	local position = root.Position
+	local want = cfg.magnetSize
+	pcall(function()
+		if math.abs(nape.Size.X - want) > 0.1 then
+			nape.Size = Vector3.new(want, want, want)
+		end
+		-- the weld reverts a single write; re-asserting every frame is the trick
+		nape.Position = Vector3.new(position.X, position.Y + cfg.magnetY, position.Z)
+	end)
+end
+
+--============================================================================
+--  MOVEMENT / AIM
+--============================================================================
+local function hoverAt(root, point, height)
+	local bob = math.sin(clock() * cfg.bobHz * 6.28318) * cfg.bobAmp
+	pcall(function()
+		root.Position = Vector3.new(point.X, point.Y + height + bob, point.Z)
+		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+	end)
+end
+
+local function aimAt(root, camera, point)
+	pcall(function()
+		local from = root.Position
+		if (point - from).Magnitude > 0.05 then
+			root.CFrame = CFrame.lookAt(from, point)
+		end
+	end)
+	if camera then
+		pcall(function()
+			local from = camera.CFrame.Position
+			if (point - from).Magnitude > 0.05 then
+				camera.CFrame = CFrame.lookAt(from, point)
+			end
+		end)
+	end
+end
+
+--============================================================================
+--  HUD READS
+--============================================================================
+local function hudTop()
+	local playerGui = lp:FindFirstChild("PlayerGui")
+	local interface = playerGui and playerGui:FindFirstChild("Interface")
+	local hud = interface and interface:FindFirstChild("HUD")
+	local main = hud and hud:FindFirstChild("Main")
+	return main and main:FindFirstChild("Top")
+end
+
+-- Gas and Blades sit one numbered wrapper frame below Top; two levels of
+-- search are enough and survive a layout index changing.
+local function hudNode(top, name, depth)
+	if not top then return nil end
+	local direct = top:FindFirstChild(name)
+	if direct then return direct end
+	if (depth or 0) >= 2 then return nil end
+	for _, child in ipairs(top:GetChildren()) do
+		local found = hudNode(child, name, (depth or 0) + 1)
+		if found then return found end
+	end
+	return nil
+end
+
+local function gasPercent()
+	local gas = hudNode(hudTop(), "Gas")
+	local percentage = gas and gas:FindFirstChild("Percentage")
+	if not percentage then return nil end
+	local ok, text = pcall(function() return percentage.Text end)
+	if not ok or type(text) ~= "string" then return nil end
+	return tonumber(string.match(text, "(%d+)"))
+end
+
+local function refills()
+	local ok, value = pcall(function() return tonumber(lp:GetAttribute("Refills")) end)
+	if ok and value then return value end
+	local blades = hudNode(hudTop(), "Blades")
+	local sets = blades and blades:FindFirstChild("Sets")
+	if not sets then return 0 end
+	local ok2, text = pcall(function() return sets.Text end)
+	if not ok2 or type(text) ~= "string" then return 0 end
+	return tonumber(string.match(text, "(%d+)")) or 0
+end
+
+local function bladesAllBroken(char)
+	local rig = char and char:FindFirstChild("Rig_" .. lp.Name)
+	local left = rig and rig:FindFirstChild("LeftHand")
+	local right = rig and rig:FindFirstChild("RightHand")
+	if not left or not right then return false end
+	for _, hand in ipairs({ left, right }) do
+		for index = 1, 7 do
+			local blade = hand:FindFirstChild("Blade_" .. index)
+			if not blade then return false end
+			local ok, transparency = pcall(function() return blade.Transparency end)
+			if not ok or transparency ~= 1 then return false end
+		end
+	end
+	return true
+end
+
+--============================================================================
+--  REFILL
+--============================================================================
+local Refill = { tries = 0, nextPress = 0, until_ = 0 }
+
+local function findPrompt(part)
+	if not part then return nil end
+	for _, descendant in ipairs(part:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then return descendant end
+	end
+	local parent = part.Parent
+	if parent then
+		for _, descendant in ipairs(parent:GetDescendants()) do
+			if descendant:IsA("ProximityPrompt") and descendant.Enabled ~= false then
+				return descendant
+			end
+		end
+	end
+	return nil
+end
+
+local function pressRefill(root, part)
+	local method = cfg.refillMethod
+
+	if method == "auto" or method == "prompt" then
+		local prompt = findPrompt(part)
+		if prompt and api.fireproximityprompt then
+			if pcall(api.fireproximityprompt, prompt) then return end
+		end
+		if method == "prompt" then method = "key" end
+	end
+
+	if method == "auto" or method == "touch" then
+		if api.firetouchinterest then
+			if pcall(api.firetouchinterest, root, part, 0) then
+				task.delay(0.12, function()
+					pcall(api.firetouchinterest, root, part, 1)
+				end)
+				return
+			end
+		end
+		if method == "touch" then method = "key" end
+	end
+
+	if api.keypress then
+		pcall(api.keypress, 0x52) -- R
+		task.delay(0.3, function()
+			if api.keyrelease then pcall(api.keyrelease, 0x52) end
+		end)
+	end
+end
+
+local function refillTick(now, root)
+	if not cfg.refill then
+		S.refilling = false
+		return false
+	end
+
+	-- Gas, blade state and blade sets are refreshed once per slow tick. Reading
+	-- the HUD / 14 blade parts at 30 Hz was the most expensive thing in the loop.
+	local gas = S.gas
+	local broken = S.bladesBroken == true and cfg.autoReload ~= false
+	local low = gas ~= nil and gas <= cfg.refillGas
+
+	S.refillNeeded = low or broken
+	if not low and not broken then
+		S.refilling = false
+		Refill.tries = 0
+		Refill.until_ = 0
+		return false
+	end
+
+	S.refilling = true
+
+	if now < Refill.until_ then
+		S.state = "refill cooldown"
+		return true
+	end
+
+	if (S.refills or 0) <= 0 then
+		S.state = "refill: no blade sets"
+		Refill.until_ = now + cfg.refillCooldown
+		return true
+	end
+
+	local part = refillPart()
+	if not part then
+		S.state = "refill: no gas station on this map"
+		Refill.until_ = now + cfg.refillCooldown
+		return true
+	end
+
+	local spot = part.Position + Vector3.new(0, 3, 0)
+	-- Tween to the tank instead of snapping there: a 300-stud jump across the
+	-- map is exactly the movement pattern anti-cheat looks for. While a travel
+	-- is in flight this must NOT restart it every refill tick, or the tween is
+	-- cancelled and rebuilt 10 times a second and never arrives.
+	if cfg.moveMode == "tween" and Move and (root.Position - spot).Magnitude > 10 then
+		if not S.travelling then Move.travel(spot, cfg.travelSpeed) end
+		S.state = "tweening to gas"
+		return true
+	end
+
+	pcall(function()
+		root.Position = spot
+		root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		local camera = workspace.CurrentCamera
+		if camera then
+			camera.CFrame = CFrame.lookAt(spot + Vector3.new(0, 6, 0), part.Position)
+		end
+	end)
+
+	if now >= Refill.nextPress then
+		Refill.nextPress = now + 0.7
+		Refill.tries = Refill.tries + 1
+		pressRefill(root, part)
+		if Refill.tries >= cfg.refillTries then
+			Refill.tries = 0
+			Refill.until_ = now + cfg.refillCooldown
+			S.state = "refill: station did not respond"
+			return true
+		end
+	end
+
+	S.state = string.format("refilling (gas %s)", gas and (tostring(gas) .. "%") or "?")
+	return true
+end
+
+--============================================================================
+--  RESULTS SCREEN / RETRY
+--============================================================================
+local function resultsInfo()
+	local playerGui = lp:FindFirstChild("PlayerGui")
+	local interface = playerGui and playerGui:FindFirstChild("Interface")
+	local rewards = interface and interface:FindFirstChild("Rewards")
+	local main = rewards and rewards:FindFirstChild("Main")
+	return main and main:FindFirstChild("Info")
+end
+
+local function resultsSignature()
+	-- in the lobby the same labels keep the last round's values; workspace.Type
+	-- is nil there, so nothing is retried before a mission exists
+	local okType, missionType = pcall(function() return workspace:GetAttribute("Type") end)
+	if not okType or missionType == nil then return nil end
+	local info = resultsInfo()
+	if not info then return nil end
+	local stateLabel = info:FindFirstChild("State")
+	if not stateLabel then return nil end
+	local ok, text = pcall(function() return stateLabel.Text end)
+	if not ok or type(text) ~= "string" then return nil end
+	local upper = string.upper(text)
+	local completed = string.find(upper, "COMPLETED", 1, true) ~= nil
+	local failed = string.find(upper, "FAILED", 1, true) ~= nil
+	if not completed and not failed then return nil end
+
+	local parts = { upper }
+	local main = info:FindFirstChild("Main")
+	local stats = main and main:FindFirstChild("Stats")
+	for _, name in ipairs({ "Time_Taken", "Damage", "Kills", "Crits" }) do
+		local row = stats and stats:FindFirstChild(name)
+		local amount = row and row:FindFirstChild("Amount")
+		local okAmount, value = pcall(function() return amount.Text end)
+		parts[#parts + 1] = tostring(okAmount and value or "?")
+	end
+	local okSeconds, seconds = pcall(function() return workspace:GetAttribute("Seconds") end)
+	parts[#parts + 1] = tostring(okSeconds and seconds or "?")
+	return table.concat(parts, "|")
+end
+
+local function findResultsButton()
+	local playerGui = lp:FindFirstChild("PlayerGui")
+	local interface = playerGui and playerGui:FindFirstChild("Interface")
+	local rewards = interface and interface:FindFirstChild("Rewards")
+	if not rewards then return nil end
+	for _, descendant in ipairs(rewards:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			local name = string.lower(descendant.Name)
+			local text = ""
+			pcall(function() text = string.lower(descendant.Text) end)
+			if string.find(name, "retry", 1, true)
+				or string.find(text, "retry", 1, true)
+				or string.find(text, "play again", 1, true) then
+				return descendant
+			end
+		end
+	end
+	return nil
+end
+
+-- Fire every non-executor connection of a GUI signal: that is one real click's
+-- worth of handlers. isexecutorclosure keeps our own listeners out of it.
+local function fireSignal(signal)
+	if signal == nil then return false end
+	local fired = 0
+	local scanned = false
+	if api.getconnections then
+		scanned = true
+		local ok, connections = pcall(api.getconnections, signal)
+		if ok and type(connections) == "table" then
+			for _, connection in ipairs(connections) do
+				local ours = false
+				if api.isexecutorclosure then
+					local okFn, fn = pcall(function() return connection.Function end)
+					if okFn and type(fn) == "function" then
+						local okCheck, executorOwned = pcall(api.isexecutorclosure, fn)
+						ours = okCheck and executorOwned == true
+					end
+				end
+				if not ours then
+					local okFire = pcall(function()
+						if type(connection.Fire) == "function" then
+							return connection.Fire(connection)
+						end
+						return connection:Fire()
+					end)
+					if okFire then fired = fired + 1 end
+				end
+			end
+		end
+	end
+	-- firesignal is only a fallback when the executor cannot enumerate
+	-- connections: calling it on an empty signal would look like success while
+	-- nothing happened, and the retry would then be latched for that result
+	if fired == 0 and not scanned and api.firesignal then
+		if pcall(api.firesignal, signal) then fired = 1 end
+	end
+	return fired > 0
+end
+
+local function pressRetry(force)
+	-- never send the backslash / D / D / Enter sequence into a live mission:
+	-- outside the results screen those keys open menus and move the character
+	if not force and resultsSignature() == nil and findResultsButton() == nil then
+		return false, "no results screen"
+	end
+	local button = findResultsButton()
+	if button then
+		if fireSignal(button.Activated) then return true, "button" end
+		local okClick = pcall(function() return button.MouseButton1Click end)
+		if okClick and fireSignal(button.MouseButton1Click) then return true, "click" end
+	end
+
+	if not api.keypress or not api.keyrelease then
+		return false, "no keyboard API and no Retry button"
+	end
+
+	local function tap(vk, hold, gap)
+		pcall(api.keypress, vk)
+		task.wait(hold or 0.1)
+		pcall(api.keyrelease, vk)
+		task.wait(gap or 0.15)
+	end
+
+	-- the game's own results-screen navigation: Leave_2 -> Modify -> Retry
+	tap(0xDC, 0.15, 0.55)          -- backslash enters key navigation
+	tap(cfg.retryRight, 0.10, 0.25)
+	tap(cfg.retryRight, 0.10, 0.25)
+	tap(0x0D, 0.15, 0.45)          -- Enter
+	tap(0xDC, 0.15, 0.30)
+	return true, "keys"
+end
+
+local function retryTick(now)
+	-- detect the results screen even with auto retry off, so the farm stops
+	-- attacking a round that has already ended
+	local signature = resultsSignature()
+	if signature == nil then
+		S.results = false
+		return
+	end
+	S.results = true
+	S.target = nil
+	S.refilling = false
+	-- one hook per unique result: lifetime stats, rewards webhook, boss-skin
+	-- check and rejoin. It runs even with auto retry off, so the stats are
+	-- recorded for manual play too.
+	if S.resultSeenSig ~= signature then
+		S.resultSeenSig = signature
+		if resultHook then
+			local okHook, handled = pcall(resultHook, signature)
+			if not okHook then S.err = tostring(handled) end
+			if okHook and handled then return end
+		end
+	end
+	if not cfg.autoRetry then return end
+
+	if S.retrySig == signature then return end
+	if S.lastRetry and (now - S.lastRetry) < cfg.retryCooldown then return end
+	if cfg.retryMax > 0 and (S.retryTries or 0) >= cfg.retryMax then
+		S.state = "retry cap reached"
+		return
+	end
+	if not focused() then
+		S.state = "results screen - window unfocused"
+		return
+	end
+
+	S.retrySig = signature
+	S.lastRetry = now
+	S.retryTries = (S.retryTries or 0) + 1
+	S.state = "retry " .. tostring(S.retryTries)
+	task.spawn(function()
+			local ok, sent, how = pcall(pressRetry, true)
+			if ok and sent then
+				S.state = "retry sent (" .. tostring(how) .. ")"
+			else
+				S.state = "retry failed"
+				S.err = ok and tostring(how) or tostring(sent)
+				-- do not latch a failed attempt: the cooldown may try again
+				S.retrySig = nil
+			end
+		end)
+end
+
+--============================================================================
+--  UI-AWARE PAUSE
+--============================================================================
+-- Clicking the menu must not also swing a blade. The farm pauses while a
+-- textbox has focus, while the pointer is over the open window, and briefly
+-- after it leaves.
+local function uiBusy()
+	if not cfg.uiGuard then return false end
+	local now = clock()
+	local okFocus, textBox = pcall(function() return UserInputService:GetFocusedTextBox() end)
+	if okFocus and textBox then
+		S.uiHold = now
+		return true
+	end
+	-- The menu collapses to its title bar in the top-left while farming, so a
+	-- synthetic click at the aim point cannot press it. While it is collapsed
+	-- it does not block the farm; the user can reopen it (and press Stop) at
+	-- any time, which is the only stop path a touch-only device has.
+	local win = UI.win
+	if win and win:IsOpen() then
+		local collapsed = type(win.IsCollapsed) == "function" and win:IsCollapsed()
+		if not collapsed then
+			S.uiHold = now
+			return true
+		end
+	end
+	-- The floating UI button stays on screen while farming. If the synthetic
+	-- click follows the last touch, parking the cursor on that button would
+	-- reopen the menu forever, so pause while the pointer is over it.
+	if win and type(win.GetFabBounds) == "function" then
+		local fabX, fabY, fabW, fabH = win:GetFabBounds()
+		if fabX then
+			local mouse = UserInputService:GetMouseLocation()
+			local inset = 0
+			pcall(function() inset = GuiService:GetGuiInset().Y end)
+			local mouseY = mouse.Y - inset
+			if mouse.X >= fabX and mouse.X <= fabX + fabW and mouseY >= fabY and mouseY <= fabY + fabH then
+				S.uiHold = now
+				return true
+			end
+		end
+	end
+	if S.uiHold > 0 and (now - S.uiHold) < 0.35 then return true end
+	return false
+end
+
+--============================================================================
+--  v3 SHARED HELPERS
+--============================================================================
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+-- "two words" and "two_words" must match the same UI text.
+local function normText(value)
+	return (string.lower(tostring(value or "")):gsub("[^%w]", ""))
+end
+
+local function listOf(text)
+	local out = {}
+	for token in tostring(text or ""):gmatch("[^,]+") do
+		local trimmed = token:match("^%s*(.-)%s*$")
+		if trimmed ~= "" then out[#out + 1] = trimmed end
+	end
+	return out
+end
+
+local function hasValue(list, value)
+	for _, entry in ipairs(list or {}) do
+		if entry == value then return true end
+	end
+	return false
+end
+
+--============================================================================
+--  GAME-UI AUTOMATION
+--  AOTR's menu names are not in the recon, so every lookup is a name-or-text
+--  match over a broad alias list. Nothing is cached across a panel rebuild,
+--  and every call is pcall-guarded: a renamed button disables exactly one
+--  action, never the farm.
+--============================================================================
+local GuiAuto = {}
+
+local function guiRoots()
+	local roots, seen = {}, {}
+	local function add(instance)
+		if instance and not seen[instance] then
+			seen[instance] = true
+			roots[#roots + 1] = instance
+		end
+	end
+	local ok, playerGui = pcall(function() return lp:FindFirstChild("PlayerGui") end)
+	if ok then add(playerGui) end
+	if api.gethui then
+		local okHui, hidden = pcall(api.gethui)
+		if okHui then add(hidden) end
+	end
+	local okCore, core = pcall(function() return game:GetService("CoreGui") end)
+	if okCore then add(core) end
+	return roots
+end
+
+local function isOurs(instance)
+	local win = UI.win
+	local gui = win and win._gui
+	if gui then
+		local node = instance
+		while node do
+			if node == gui then return true end
+			node = node.Parent
+		end
+	end
+	local node = instance
+	while node do
+		if node:IsA("ScreenGui") and string.find(normText(node.Name), "vega", 1, true) then return true end
+		node = node.Parent
+	end
+	return false
+end
+
+local function guiVisible(instance)
+	local node = instance
+	while node do
+		local okClass, isGui = pcall(function() return node:IsA("GuiObject") end)
+		if okClass and isGui then
+			local okVisible, visible = pcall(function() return node.Visible end)
+			if okVisible and visible == false then return false end
+			local okSize, size = pcall(function() return node.AbsoluteSize end)
+			if okSize and size and (size.X < 1 or size.Y < 1) then return false end
+		end
+		node = node.Parent
+	end
+	return true
+end
+
+local function textOf(instance)
+	local parts = { tostring(instance.Name or "") }
+	local okText, text = pcall(function() return instance.Text end)
+	if okText and type(text) == "string" then parts[#parts + 1] = text end
+	local okLabel, label = pcall(function() return instance:FindFirstChildWhichIsA("TextLabel", true) end)
+	if okLabel and label then
+		local ok, value = pcall(function() return label.Text end)
+		if ok and type(value) == "string" then parts[#parts + 1] = value end
+	end
+	return table.concat(parts, " ")
+end
+
+local function buttonMatches(instance, aliases)
+	local haystack = normText(textOf(instance))
+	for _, alias in ipairs(aliases or {}) do
+		local needle = normText(alias)
+		if needle ~= "" and string.find(haystack, needle, 1, true) then return true, alias end
+	end
+	return false, nil
+end
+
+-- Scope a lookup to a named panel when one exists, otherwise search the whole
+-- PlayerGui. The panel path is what stops a generic "Start" from pressing the
+-- wrong Start somewhere else in the lobby.
+function GuiAuto.findPanel(names)
+	for _, root in ipairs(guiRoots()) do
+		for _, instance in ipairs(root:GetDescendants()) do
+			local okName, name = pcall(function() return instance.Name end)
+			if okName and name then
+				local flat = normText(name)
+				for _, alias in ipairs(names or {}) do
+					if string.find(flat, normText(alias), 1, true) and guiVisible(instance) then
+						local okClass, isFrame = pcall(function()
+							return instance:IsA("Frame") or instance:IsA("ScrollingFrame") or instance:IsA("CanvasGroup")
+						end)
+						if okClass and isFrame then return instance, alias end
+					end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+function GuiAuto.findButton(aliases, scope, exclude)
+	local roots = scope and { scope } or guiRoots()
+	local excludeFlat = {}
+	for _, entry in ipairs(exclude or {}) do excludeFlat[#excludeFlat + 1] = normText(entry) end
+	for _, root in ipairs(roots) do
+		for _, instance in ipairs(root:GetDescendants()) do
+			local okButton, isButton = pcall(function() return instance:IsA("GuiButton") end)
+			if okButton and isButton and not isOurs(instance) and guiVisible(instance) then
+				local matched = buttonMatches(instance, aliases)
+				if matched then
+					local flat = normText(textOf(instance))
+					local skip = false
+					for _, entry in ipairs(excludeFlat) do
+						if string.find(flat, entry, 1, true) then skip = true break end
+					end
+					if not skip then return instance, matched end
+				end
+			end
+		end
+	end
+	return nil
+end
+
+-- Fire the game's own connections first (a real click does the same), then a
+-- synthetic mouse event at the button centre for buttons whose handlers are
+-- hidden from getconnections.
+function GuiAuto.click(button)
+	if not button or not button.Parent then return false, "button is gone" end
+	local okActivated, fired = pcall(fireSignal, button.Activated)
+	if okActivated and fired then return true, "activated" end
+	local okMouse, firedMouse = pcall(fireSignal, button.MouseButton1Click)
+	if okMouse and firedMouse then return true, "mouse" end
+	local okVim, vim = pcall(function() return game:GetService("VirtualInputManager") end)
+	if okVim and vim then
+		local okPos, position = pcall(function()
+			return button.AbsolutePosition + button.AbsoluteSize / 2
+		end)
+		if okPos and position then
+			local okSend = pcall(function()
+				vim:SendMouseButtonEvent(position.X, position.Y, 0, true, game, 1)
+				task.wait(0.05)
+				vim:SendMouseButtonEvent(position.X, position.Y, 0, false, game, 1)
+			end)
+			if okSend then return true, "input" end
+		end
+	end
+	return false, "no click path"
+end
+
+function GuiAuto.labels(scope, limit)
+	local texts = {}
+	local query = scope or (lp:FindFirstChild("PlayerGui"))
+	if not query then return "" end
+	for _, instance in ipairs(query:GetDescendants()) do
+		local okLabel, isLabel = pcall(function() return instance:IsA("TextLabel") end)
+		if okLabel and isLabel and guiVisible(instance) then
+			local okText, text = pcall(function() return instance.Text end)
+			if okText and type(text) == "string" and text ~= "" then
+				texts[#texts + 1] = text
+				if #texts >= (limit or 120) then break end
+			end
+		end
+	end
+	return table.concat(texts, " | ")
+end
+
+function GuiAuto.dump()
+	local buttons, labels = 0, 0
+	for _, root in ipairs(guiRoots()) do
+		for _, instance in ipairs(root:GetDescendants()) do
+			local okButton, isButton = pcall(function() return instance:IsA("GuiButton") end)
+			if okButton and isButton and not isOurs(instance) and guiVisible(instance) then
+				buttons = buttons + 1
+				if buttons <= 220 then say("BTN " .. tostring(instance:GetFullName()) .. "  [" .. normText(textOf(instance)) .. "]") end
+			end
+		end
+	end
+	say("UI dump: " .. buttons .. " visible buttons (220 printed). Copy this list if an action says 'button not found'.")
+	return buttons
+end
+
+--============================================================================
+--  MOVEMENT: TWEEN / HOVER / TELEPORT
+--============================================================================
+Move = { active = false, tween = nil }
+
+function Move.cancel()
+	if Move.tween then pcall(function() Move.tween:Cancel() end) end
+	Move.tween = nil
+	Move.active = false
+	S.travelling = false
+	local _, root = myChar()
+	if root then pcall(function() root.Anchored = false end) end
+end
+
+--  Tween travel anchors the root for the flight, then unanchors it. The speed is
+--  capped so a long flight is never a single frame jump, which is the whole
+--  point: the server sees a continuous position track instead of a teleport.
+function Move.travel(point, speed)
+	local _, root = myChar()
+	if not root then return false end
+	if cfg.moveMode == "teleport" then
+		pcall(function() root.CFrame = CFrame.new(point) end)
+		return true
+	end
+	if cfg.moveMode == "hover" then return false end
+	local distance = (root.Position - point).Magnitude
+	if distance < 3 then return true end
+	if Move.active then Move.cancel() end
+	Move.active = true
+	S.travelling = true
+	local duration = math.clamp(distance / math.max(40, tonumber(speed) or cfg.travelSpeed), 0.08, 4)
+	local okAnchor = pcall(function() root.Anchored = true end)
+	if not okAnchor then
+		Move.active = false
+		S.travelling = false
+		return false
+	end
+	local okTween, tween = pcall(function()
+		return TweenService:Create(root, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = CFrame.new(point) })
+	end)
+	if not okTween or not tween then
+		Move.cancel()
+		return false
+	end
+	Move.tween = tween
+	if not pcall(function() tween:Play() end) then
+		Move.cancel()
+		return false
+	end
+	task.spawn(function()
+		local deadline = clock() + duration + 0.75
+		while Move.tween == tween and clock() < deadline do task.wait(0.03) end
+		if Move.tween == tween then
+			Move.tween = nil
+			Move.active = false
+			S.travelling = false
+			local _, finishedRoot = myChar()
+			if finishedRoot then
+				pcall(function()
+					finishedRoot.Anchored = false
+					finishedRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+				end)
+			end
+		end
+	end)
+	return true
+end
+
+--============================================================================
+--  WEBHOOKS + LIFETIME STATS
+--============================================================================
+local Stats = {
+	data = {
+		missions = 0, raids = 0, waves = 0, rounds = 0, kills = 0,
+		boss = 0, mythical = 0, seconds = 0, byType = {}, started = os.time(),
+	},
+}
+local STATS_PATH = "Vega/aotr_stats.json"
+
+local function loadStats()
+	if not api.readfile then return end
+	local ok, source = pcall(api.readfile, STATS_PATH)
+	if not ok or type(source) ~= "string" or #source < 2 then return end
+	local okDecode, data = pcall(function() return HttpService:JSONDecode(source) end)
+	if not okDecode or type(data) ~= "table" then return end
+	for key, value in pairs(data) do
+		if type(Stats.data[key]) == type(value) then Stats.data[key] = value end
+	end
+end
+
+local function saveStats()
+	if not api.writefile then return end
+	if api.makefolder then pcall(api.makefolder, "Vega") end
+	local ok, encoded = pcall(function() return HttpService:JSONEncode(Stats.data) end)
+	if ok then pcall(api.writefile, STATS_PATH, encoded) end
+end
+
+local Webhook = { queue = {}, busy = false, last = 0 }
+
+local function httpPost(url, payload)
+	local requestFn = (type(request) == "function" and request)
+		or (type(http_request) == "function" and http_request)
+		or (type(syn) == "table" and type(syn.request) == "function" and syn.request)
+		or (type(fluxus) == "table" and type(fluxus.request) == "function" and fluxus.request)
+		or (type(http) == "table" and type(http.request) == "function" and http.request)
+	if not requestFn then return false, "no http API" end
+	local okBody, body = pcall(function() return HttpService:JSONEncode(payload) end)
+	if not okBody then return false, body end
+	local okCall, response = pcall(requestFn, {
+		Url = url,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json" },
+		Body = body,
+	})
+	if not okCall then return false, tostring(response) end
+	local code = 0
+	if type(response) == "table" then code = tonumber(response.StatusCode or response.Status or 0) or 0 end
+	return code >= 200 and code < 300, code
+end
+
+local function embed(title, description, color, fields)
+	return {
+		title = title,
+		description = description,
+		color = color or 0x5BC0EB,
+		fields = fields or {},
+		footer = { text = "AOTR Delta v" .. VERSION },
+		timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+	}
+end
+
+local function webhookPush(url, payload)
+	if type(url) ~= "string" or url == "" then return false end
+	if not string.find(url, "https://discord", 1, true) and not string.find(url, "https://canary.discord", 1, true) then
+		return false, "not a Discord webhook URL"
+	end
+	Webhook.queue[#Webhook.queue + 1] = { url = url, payload = payload }
+	if not Webhook.busy then
+		Webhook.busy = true
+		task.spawn(function()
+			while #Webhook.queue > 0 do
+				local item = table.remove(Webhook.queue, 1)
+				local wait = math.max(0, 2 - (clock() - Webhook.last))
+				if wait > 0 then task.wait(wait) end
+				Webhook.last = clock()
+				local ok, detail = httpPost(item.url, item.payload)
+				if not ok then say("webhook: " .. tostring(detail)) end
+			end
+			Webhook.busy = false
+		end)
+	end
+	return true
+end
+
+local function statsFields()
+	local data = Stats.data
+	return {
+		{ name = "Missions", value = tostring(data.missions or 0), inline = true },
+		{ name = "Raids", value = tostring(data.raids or 0), inline = true },
+		{ name = "Waves", value = tostring(data.waves or 0), inline = true },
+		{ name = "Kills", value = tostring(data.kills or 0), inline = true },
+		{ name = "Rounds", value = tostring(data.rounds or 0), inline = true },
+		{ name = "Boss skins", value = tostring(data.boss or 0), inline = true },
+		{ name = "Mythical families", value = tostring(data.mythical or 0), inline = true },
+		{ name = "Playtime", value = string.format("%d min", math.floor((data.seconds or 0) / 60)), inline = true },
+	}
+end
+
+loadStats()
+
+--============================================================================
+--  VISUALS: 3D OFF / PERFORMANCE / FOG
+--============================================================================
+local Visual = { saved = nil, threeD = false }
+
+local function visualSnapshot()
+	if Visual.saved then return end
+	local saved = {}
+	pcall(function()
+		saved.fogStart = Lighting.FogStart
+		saved.fogEnd = Lighting.FogEnd
+		saved.globalShadows = Lighting.GlobalShadows
+	end)
+	pcall(function() saved.quality = settings().Rendering.QualityLevel end)
+	if api.getfpscap then pcall(function() saved.fps = api.getfpscap() end) end
+	local okAtmo, atmosphere = pcall(function() return Lighting:FindFirstChildOfClass("Atmosphere") end)
+	if okAtmo and atmosphere then
+		saved.atmosphere = atmosphere
+		pcall(function() saved.density = atmosphere.Density end)
+	end
+	Visual.saved = saved
+end
+
+function Visual.apply()
+	visualSnapshot()
+	if cfg.removeFog then
+		pcall(function()
+			Lighting.FogStart = 100000
+			Lighting.FogEnd = 100000
+		end)
+		if Visual.saved.atmosphere then pcall(function() Visual.saved.atmosphere.Density = 0 end) end
+	elseif Visual.saved then
+		pcall(function()
+			if Visual.saved.fogStart then Lighting.FogStart = Visual.saved.fogStart end
+			if Visual.saved.fogEnd then Lighting.FogEnd = Visual.saved.fogEnd end
+		end)
+		if Visual.saved.atmosphere and Visual.saved.density then
+			pcall(function() Visual.saved.atmosphere.Density = Visual.saved.density end)
+		end
+	end
+
+	if cfg.disable3D then
+		local ok = pcall(function() RunService:Set3dRenderingEnabled(false) end)
+		if ok then
+			Visual.threeD = true
+		else
+			S.autoMsg = "3D toggle is not available in this build"
+		end
+	elseif Visual.threeD then
+		pcall(function() RunService:Set3dRenderingEnabled(true) end)
+		Visual.threeD = false
+	end
+
+	if cfg.performance then
+		pcall(function() Lighting.GlobalShadows = false end)
+		pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+		if api.setfpscap then pcall(api.setfpscap, 30) end
+	else
+		if Visual.saved and Visual.saved.globalShadows ~= nil then
+			pcall(function() Lighting.GlobalShadows = Visual.saved.globalShadows end)
+		end
+		if Visual.saved and Visual.saved.quality ~= nil then
+			pcall(function() settings().Rendering.QualityLevel = Visual.saved.quality end)
+		end
+		if Visual.saved and Visual.saved.fps and api.setfpscap then pcall(api.setfpscap, Visual.saved.fps) end
+	end
+end
+
+function Visual.restore()
+	if Visual.threeD then pcall(function() RunService:Set3dRenderingEnabled(true) end) end
+	Visual.threeD = false
+	if Visual.saved then
+		pcall(function()
+			if Visual.saved.fogStart then Lighting.FogStart = Visual.saved.fogStart end
+			if Visual.saved.fogEnd then Lighting.FogEnd = Visual.saved.fogEnd end
+			if Visual.saved.globalShadows ~= nil then Lighting.GlobalShadows = Visual.saved.globalShadows end
+		end)
+		if Visual.saved.quality ~= nil then
+			pcall(function() settings().Rendering.QualityLevel = Visual.saved.quality end)
+		end
+		if Visual.saved.fps and api.setfpscap then pcall(api.setfpscap, Visual.saved.fps) end
+		if Visual.saved.atmosphere and Visual.saved.density then
+			pcall(function() Visual.saved.atmosphere.Density = Visual.saved.density end)
+		end
+	end
+	Visual.saved = nil
+end
+
+--============================================================================
+--  ROUND AUTOMATION: START / RAIDS / WAVES / DIFFICULTY / MODIFIERS
+--============================================================================
+local Auto = { next = 0, lastDetail = nil }
+local MODE_PANELS = {
+	mission = { "mission", "missions", "story", "campaign" },
+	raid = { "raid", "raids" },
+	wave = { "wave", "waves", "endless", "survival" },
+	mastery = { "mastery", "masteries", "titanmastery" },
+}
+
+local function roundActive()
+	local folder = workspace:FindFirstChild("Titans")
+	if folder then
+		for _, model in ipairs(folder:GetChildren()) do
+			if model:IsA("Model") and not dead(model) then return true end
+		end
+	end
+	if resultsSignature() then return true end
+	local ok, kind = pcall(function() return workspace:GetAttribute("Type") end)
+	if not ok or kind == nil then return false end
+	local flat = normText(kind)
+	return flat ~= "" and flat ~= "none" and flat ~= "lobby"
+end
+
+local function chooseDifficulty()
+	local ladder = { "Easy", "Normal", "Hard", "Aberrant", "Freedom" }
+	local found = {}
+	for _, name in ipairs(ladder) do
+		local button = GuiAuto.findButton({ name })
+		if button then found[#found + 1] = { name = name, button = button } end
+	end
+	if #found == 0 then return false, "no difficulty buttons" end
+	local pick = found[#found]
+	if cfg.difficulty ~= "Hardest" then
+		for _, entry in ipairs(found) do
+			if normText(entry.name) == normText(cfg.difficulty) then pick = entry break end
+		end
+	end
+	local ok = GuiAuto.click(pick.button)
+	return ok, pick.name
+end
+
+local ModifierGate = { at = 0, done = false }
+local function autoModifiersStep(now)
+	if not cfg.autoModifiers then return end
+	if ModifierGate.done then return end
+	if now < ModifierGate.at then return end
+	ModifierGate.at = now + 7
+	local panel = GuiAuto.findPanel({ "modifier", "modifiers", "mods" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "modifier", "modifiers" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	ModifierGate.done = true
+	local exclude = listOf(cfg.modifierExclude)
+	local blacklist = { "start", "close", "back", "confirm", "remove", "cancel",
+		"reroll", "random", "reset", "clear" }
+	for _, entry in ipairs(blacklist) do exclude[#exclude + 1] = entry end
+	local clicked = 0
+	for _, instance in ipairs(panel:GetDescendants()) do
+		if clicked >= 10 then break end
+		local okButton, isButton = pcall(function() return instance:IsA("GuiButton") end)
+		if okButton and isButton and guiVisible(instance) and not isOurs(instance) then
+			local flat = normText(textOf(instance))
+			local skip = false
+			for _, entry in ipairs(exclude) do
+				if string.find(flat, normText(entry), 1, true) then skip = true break end
+			end
+			if not skip and GuiAuto.click(instance) then clicked = clicked + 1 end
+		end
+	end
+	S.autoMsg = "modifiers: " .. clicked .. " clicked"
+end
+
+function Auto.start(mode)
+	-- the dropdown stores "Missions"/"Raids"/"Waves"; the panel table is singular
+	local key = string.gsub(string.lower(tostring(mode or "")), "s$", "")
+	local names = MODE_PANELS[key] or MODE_PANELS[mode] or { mode }
+	local panel = GuiAuto.findPanel(names)
+	if not panel then
+		local nav = GuiAuto.findButton(names)
+		if nav then GuiAuto.click(nav) end
+		return false, "opened the " .. mode .. " panel"
+	end
+
+	if key == "raid" and #cfg.raidTypes > 0 then
+		local index = ((S.raidIndex or 1) - 1) % #cfg.raidTypes + 1
+		local card = GuiAuto.findButton({ cfg.raidTypes[index] }, panel)
+		if card then GuiAuto.click(card) end
+	end
+
+	chooseDifficulty()
+	autoModifiersStep(clock())
+
+	local start = GuiAuto.findButton(
+		{ "start", "play", "begin", "deploy", "launch", "join", "ready", "solo" },
+		panel, { "restart" })
+	if not start then return false, "no Start button in the " .. mode .. " panel" end
+	local ok, how = GuiAuto.click(start)
+	if ok then
+		S.autoStarts = (S.autoStarts or 0) + 1
+		if key == "raid" and cfg.raidRotate and #cfg.raidTypes > 0 then
+			S.raidIndex = ((S.raidIndex or 1) % #cfg.raidTypes) + 1
+		end
+		return true, "start clicked (" .. tostring(how) .. ")"
+	end
+	return false, "Start was found but could not be clicked"
+end
+
+local function autoStartStep(now)
+	local mode = string.lower(tostring(cfg.autoStartMode or "none"))
+	if mode == "none" then return end
+	if not S.running or S.results then return end
+	if now < Auto.next then return end
+	Auto.next = now + 6
+	if roundActive() then return end
+	if S.soloBlocked or uiBusy() then return end
+	local ok, detail = Auto.start(mode)
+	Auto.lastDetail = detail
+	S.autoMsg = "auto start: " .. tostring(detail)
+	if not ok then
+		S.autoNext = now + 2
+	end
+end
+
+--============================================================================
+--  PROGRESSION: SKILL TREE / PERKS / SLOT / PRESTIGE / BOOSTS / CRATES
+--============================================================================
+local Prog = { next = 0, sellAt = 0, prestigeAt = 0 }
+
+local function cardName(button, panel)
+	local node = button.Parent
+	for _ = 1, 4 do
+		if not node or node == panel then break end
+		for _, descendant in ipairs(node:GetDescendants()) do
+			if descendant:IsA("TextLabel") and guiVisible(descendant) then
+				local ok, text = pcall(function() return descendant.Text end)
+				if ok and type(text) == "string" and #text >= 3 and #text <= 42 then
+					local flat = normText(text)
+					if not string.find(flat, "equip", 1, true) and not string.find(flat, "sell", 1, true)
+						and not string.find(flat, "enhance", 1, true) then
+						return text
+					end
+				end
+			end
+		end
+		node = node.Parent
+	end
+	return nil
+end
+
+local function skillTreeStep(now)
+	if not cfg.autoSkillTree or now < Prog.next then return end
+	Prog.next = now + 1.4
+	local panel = GuiAuto.findPanel({ "skilltree", "masterytree", "skill tree" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "skill tree", "skills", "mastery" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	local priority = listOf(cfg.skillPriority)
+	local clicked = 0
+	for _, name in ipairs(priority) do
+		if clicked >= 2 then break end
+		local button = GuiAuto.findButton({ name }, panel)
+		if button and GuiAuto.click(button) then clicked = clicked + 1 end
+	end
+	if clicked == 0 then
+		local button = GuiAuto.findButton({ "unlock", "learn", "upgrade", "purchase", "level up" }, panel)
+		if button and GuiAuto.click(button) then clicked = 1 end
+	end
+	if clicked > 0 then
+		S.autoMsg = "skill tree: " .. clicked .. " node(s) unlocked"
+	else
+		S.autoMsg = "skill tree: no unlockable node found"
+	end
+end
+
+local function perkStep(now)
+	-- this step runs whenever ANY progression option is on, so it must not
+	-- navigate on its own unless a perk option is actually enabled
+	if not (cfg.autoEquipPerks or cfg.enhancePerks or #listOf(cfg.sellPerks) > 0) then return end
+	local panel = GuiAuto.findPanel({ "perk", "perks" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "perk", "perks" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+
+	if cfg.autoEquipPerks then
+		local equip = GuiAuto.findButton({ "equip" }, panel, { "unequip", "equipped" })
+		if equip then
+			local name = cardName(equip, panel)
+			if GuiAuto.click(equip) then S.autoMsg = "perk equipped: " .. tostring(name or "?") end
+		end
+	end
+
+	if cfg.enhancePerks then
+		local limit = cfg.enhanceAllPerks and 4 or 1
+		for _ = 1, limit do
+			local enhance = GuiAuto.findButton({ "enhance", "upgrade" }, panel, { "max", "equip", "sell" })
+			if not enhance or not GuiAuto.click(enhance) then break end
+		end
+		S.autoMsg = "perks: enhance pass done"
+	end
+
+	local sellList = listOf(cfg.sellPerks)
+	if #sellList > 0 and now >= Prog.sellAt then
+		for _, instance in ipairs(panel:GetDescendants()) do
+			local okButton, isButton = pcall(function() return instance:IsA("GuiButton") end)
+			if okButton and isButton and guiVisible(instance) then
+				local isSell = buttonMatches(instance, { "sell" })
+				if isSell then
+					local name = cardName(instance, panel)
+					local target = nil
+					for _, entry in ipairs(sellList) do
+						if name and string.find(normText(name), normText(entry), 1, true) then target = entry break end
+					end
+					if target and GuiAuto.click(instance) then
+						Prog.sellAt = now + 2
+						S.autoMsg = "perk sold: " .. tostring(name)
+						task.delay(0.35, function()
+							local confirm = GuiAuto.findButton({ "confirm", "yes" }, nil, { "cancel", "no" })
+							if confirm then GuiAuto.click(confirm) end
+						end)
+						break
+					end
+				end
+			end
+		end
+	end
+end
+
+local function slotStep()
+	if cfg.autoSlot < 1 or S.slotDone then return end
+	local panel = GuiAuto.findPanel({ "slot", "slots", "loadout", "character" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "slots", "loadout", "characters" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	local button = GuiAuto.findButton({ "slot " .. cfg.autoSlot, "slot" .. cfg.autoSlot }, panel)
+	if button and GuiAuto.click(button) then
+		S.slotDone = true
+		S.autoMsg = "selected slot " .. cfg.autoSlot
+	end
+end
+
+local function prestigeStep(now)
+	if not cfg.autoPrestige or now < Prog.prestigeAt then return end
+	Prog.prestigeAt = now + 8
+	local button = GuiAuto.findButton({ "prestige", "reborn", "ascend" }, nil, { "boost", "perk" })
+	if not button then return end
+	if GuiAuto.click(button) then
+		S.autoMsg = "prestige clicked"
+		task.delay(0.5, function()
+			local confirm = GuiAuto.findButton({ "confirm", "yes", "prestige" }, nil, { "cancel", "no" })
+			if confirm then GuiAuto.click(confirm) end
+		end)
+	end
+end
+
+local BoostsGate = { at = 0 }
+local function boostsStep()
+	if not cfg.autoBoosts then return end
+	if clock() < BoostsGate.at then return end
+	BoostsGate.at = clock() + 5
+	local panel = GuiAuto.findPanel({ "boost", "boosts" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "boosts", "boost" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	local names = listOf(cfg.boostNames)
+	if #names == 0 then names = { "boost", "xp", "2x" } end
+	for _, entry in ipairs(names) do
+		local used = GuiAuto.findButton({ entry }, panel, { "buy" })
+		if used then GuiAuto.click(used) end
+	end
+	if cfg.buyBoosts then
+		local buy = GuiAuto.findButton({ "buy", "purchase" }, panel)
+		if buy then
+			GuiAuto.click(buy)
+			task.delay(0.4, function()
+				local confirm = GuiAuto.findButton({ "confirm", "yes", "buy" }, nil, { "cancel", "no" })
+				if confirm then GuiAuto.click(confirm) end
+			end)
+		end
+	end
+end
+
+local CratesGate = { at = 0 }
+local function cratesStep()
+	if not cfg.autoCrates then return end
+	if clock() < CratesGate.at then return end
+	CratesGate.at = clock() + 3
+	local panel = GuiAuto.findPanel({ "crate", "crates", "chest", "chests" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "crates", "crate", "chests" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	for _ = 1, 2 do
+		local open = GuiAuto.findButton({ "open", "open all", "unlock" }, panel, { "open menu" })
+		if not open or not GuiAuto.click(open) then break end
+		task.delay(0.5, function()
+			local confirm = GuiAuto.findButton({ "open", "confirm", "yes" }, nil, { "cancel", "no" })
+			if confirm then GuiAuto.click(confirm) end
+		end)
+	end
+end
+
+local function achievementsStep()
+	if not cfg.autoAchievements then return end
+	local panel = GuiAuto.findPanel({ "achievement", "achievements" })
+	if not panel then
+		local nav = GuiAuto.findButton({ "achievements", "achievement" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	local claimed = 0
+	for _, instance in ipairs(panel:GetDescendants()) do
+		if claimed >= 6 then break end
+		local okButton, isButton = pcall(function() return instance:IsA("GuiButton") end)
+		if okButton and isButton and guiVisible(instance) and buttonMatches(instance, { "claim" }) then
+			if GuiAuto.click(instance) then claimed = claimed + 1 end
+		end
+	end
+	if claimed > 0 then S.autoMsg = "achievements claimed: " .. claimed end
+end
+
+local ProgGate = { at = 0 }
+local function progressionStep(now)
+	local wanted = cfg.autoSkillTree or cfg.autoEquipPerks or cfg.enhancePerks
+		or #listOf(cfg.sellPerks) > 0
+		or cfg.autoSlot > 0 or cfg.autoPrestige or cfg.autoBoosts or cfg.autoCrates or cfg.autoAchievements
+	if not wanted then return end
+	if now < ProgGate.at then return end
+	ProgGate.at = now + 1.8
+	if roundActive() then return end
+	skillTreeStep(now)
+	perkStep(now)
+	slotStep()
+	prestigeStep(now)
+	boostsStep()
+	cratesStep()
+	achievementsStep()
+end
+
+--============================================================================
+--  FAMILY ROLL / STORE
+--============================================================================
+local Family = { next = 0 }
+local RARITY_ORDER = { "mythical", "legendary", "epic", "rare", "uncommon", "common" }
+
+local function wallet()
+	for _, key in ipairs({ "Coins", "Cash", "Money", "Yen", "Gold", "Currency" }) do
+		local ok, value = pcall(function() return lp:GetAttribute(key) end)
+		if ok and type(value) == "number" then return value end
+	end
+	local ok, value = pcall(function() return lp.leaderstats.Coins.Value end)
+	if ok and type(value) == "number" then return value end
+	return nil
+end
+
+local function familyStep(now)
+	if not cfg.autoFamily or now < Family.next then return end
+	Family.next = now + 2.5
+	if roundActive() then return end
+	local panel = GuiAuto.findPanel({ "family", "families", "clan" })
+	if not panel then
+		-- never read the whole PlayerGui here: our own status text mentions
+		-- "mythical", and so can chat, which would look like a roll result
+		local nav = GuiAuto.findButton({ "family", "families" })
+		if nav then GuiAuto.click(nav) end
+		return
+	end
+	local text = GuiAuto.labels(panel, 80)
+	local flat = normText(text)
+	local rarity = nil
+	for _, entry in ipairs(RARITY_ORDER) do
+		if string.find(flat, entry, 1, true) then rarity = entry break end
+	end
+
+	local targets = listOf(cfg.familyTargets)
+	local hit = false
+	if #targets == 0 then
+		hit = rarity == "mythical"
+	else
+		for _, entry in ipairs(targets) do
+			if string.find(flat, normText(entry), 1, true) then hit = true break end
+		end
+	end
+
+	S.familyRarity = rarity
+	if hit then
+		if S.familyLast ~= text then
+			S.familyLast = text
+			Stats.data.mythical = (Stats.data.mythical or 0) + 1
+			saveStats()
+			local summary = text:sub(1, 300)
+			say("family target: " .. tostring(rarity or "?") .. " - " .. summary)
+			if cfg.mythicalWebhook and cfg.webhookMythical ~= "" then
+				webhookPush(cfg.webhookMythical, {
+					username = "AOTR Delta",
+					embeds = { embed("Mythical family", summary, 0xB794F6, {
+						{ name = "Rarity", value = tostring(rarity or "target"), inline = true },
+						{ name = "Player", value = lp.Name, inline = true },
+					}) },
+				})
+			end
+			if cfg.storeFamily then
+				local store = GuiAuto.findButton({ "store", "save", "equip", "select" }, panel)
+				if store then GuiAuto.click(store) end
+			end
+			cfg.autoFamily = false
+			if UI.familyToggle then UI.familyToggle:Set(false, true) end
+			if UI.win then
+				UI.win:Notify({ Title = "Family found", Content = tostring(rarity or "target") .. " - rolling stopped.", Type = "success", Duration = 8 })
+			end
+		end
+		return
+	end
+
+	local coins = wallet()
+	if cfg.familyMinCoins > 0 and coins and coins < cfg.familyMinCoins then
+		S.autoMsg = "family: low coins (" .. tostring(coins) .. ")"
+		return
+	end
+	local roll = GuiAuto.findButton({ "roll", "reroll", "spin" }, panel, { "reroll all" })
+	if roll and GuiAuto.click(roll) then
+		S.autoMsg = "family rolled (last: " .. tostring(rarity or "?") .. ")"
+	else
+		S.autoMsg = "family: roll button not found"
+	end
+end
+
+--============================================================================
+--  COMBAT EXTRAS: ESCAPE / SKILLS / SPEARS
+--============================================================================
+local Escape = { nextScan = 0, labels = {}, lastTap = 0, direction = 1 }
+
+local function isGrabbed()
+	if not S.running or S.results then return false end
+	local _, _, humanoid = myChar()
+	if humanoid then
+		local ok, standing = pcall(function() return humanoid.PlatformStand end)
+		if ok and standing then return true end
+	end
+	local character = lp.Character
+	if character then
+		for _, key in ipairs({ "Grabbed", "Grab", "Eaten", "InGrab" }) do
+			local ok, value = pcall(function() return character:GetAttribute(key) end)
+			if ok and value ~= nil and value ~= false then return true end
+		end
+	end
+	local now = clock()
+	if now >= Escape.nextScan then
+		Escape.nextScan = now + 1.2
+		Escape.labels = {}
+		local playerGui = lp:FindFirstChild("PlayerGui")
+		local scope = playerGui and (playerGui:FindFirstChild("Interface") or playerGui)
+		if scope then
+			for _, instance in ipairs(scope:GetDescendants()) do
+				if instance:IsA("TextLabel") and guiVisible(instance) then
+					local ok, text = pcall(function() return instance.Text end)
+					if ok and type(text) == "string" then
+						local flat = normText(text)
+						if string.find(flat, "escape", 1, true) or string.find(flat, "mash", 1, true)
+							or string.find(flat, "struggle", 1, true) or string.find(flat, "getfree", 1, true) then
+							Escape.labels[#Escape.labels + 1] = instance
+						end
+					end
+				end
+			end
+		end
+	end
+	for _, label in ipairs(Escape.labels) do
+		local ok, visible = pcall(function() return label.Visible end)
+		if ok and visible then return true end
+	end
+	return false
+end
+
+local function escapeStep(now)
+	if not cfg.autoEscape then return end
+	if not S.running or S.results then return end
+	if not isGrabbed() then return end
+	if now - Escape.lastTap < 0.09 then return end
+	Escape.lastTap = now
+	if api.keypress and api.keyrelease then
+		local key = Escape.direction == 1 and 0x41 or 0x44 -- A / D
+		Escape.direction = -Escape.direction
+		pcall(api.keypress, key)
+		pcall(api.keyrelease, key)
+	end
+	if math.floor(now * 10) % 4 == 0 then click() end
+	S.state = "escaping a grab"
+end
+
+local Skill = { next = 0, codes = nil }
+local function skillCodes()
+	if Skill.codes then return Skill.codes end
+	local codes = {}
+	for token in tostring(cfg.skillKeys or ""):gmatch("[^,]+") do
+		token = token:gsub("%s", "")
+		local char = token:sub(1, 1):upper()
+		local byte = string.byte(char)
+		if char:match("%u") then
+			codes[#codes + 1] = 0x41 + (byte - 65)
+		elseif char:match("%d") then
+			codes[#codes + 1] = 0x30 + (byte - 48)
+		end
+	end
+	Skill.codes = codes
+	return codes
+end
+
+local function skillsStep(now)
+	if not cfg.autoSkills or not S.running or S.results then return end
+	if now < Skill.next then return end
+	Skill.next = now + math.max(0.15, cfg.skillDelay)
+	if not S.target or uiBusy() then return end
+	if cfg.focusGuard and not focused() then return end
+	if not api.keypress or not api.keyrelease then return end
+	for _, code in ipairs(skillCodes()) do
+		pcall(api.keypress, code)
+		pcall(api.keyrelease, code)
+	end
+end
+
+local function spearsStep(now)
+	if not cfg.infiniteSpears then return end
+	if now < (S.spearAt or 0) then return end
+	S.spearAt = now + 1
+	local containers = {}
+	local character = lp.Character
+	if character then containers[#containers + 1] = character end
+	local backpack = lp:FindFirstChildOfClass("Backpack")
+	if backpack then containers[#containers + 1] = backpack end
+	local touched = 0
+	for _, container in ipairs(containers) do
+		for _, tool in ipairs(container:GetChildren()) do
+			if tool:IsA("Tool") and string.find(normText(tool.Name), "spear", 1, true) then
+				for _, item in ipairs(tool:GetDescendants()) do
+					if item:IsA("IntValue") or item:IsA("NumberValue") then
+						local flat = normText(item.Name)
+						if string.find(flat, "ammo", 1, true) or string.find(flat, "charge", 1, true)
+							or string.find(flat, "count", 1, true) or string.find(flat, "uses", 1, true) then
+							if item.Value ~= 99 then
+								if pcall(function() item.Value = 99 end) then touched = touched + 1 end
+							end
+						end
+					end
+				end
+				local okAttributes, attributes = pcall(function() return tool:GetAttributes() end)
+				if okAttributes and type(attributes) == "table" then
+					for key, value in pairs(attributes) do
+						local flat = normText(key)
+						if type(value) == "number" and (string.find(flat, "ammo", 1, true)
+							or string.find(flat, "charge", 1, true) or string.find(flat, "count", 1, true)) then
+							if value ~= 99 then
+								if pcall(function() tool:SetAttribute(key, 99) end) then touched = touched + 1 end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	S.spears = touched > 0
+	if touched > 0 then S.autoMsg = "spears: " .. touched .. " value(s) topped up" end
+end
+
+--============================================================================
+--  RESULT HOOK / REJOIN / SHADOW CHECK / AUTO-EXECUTE
+--============================================================================
+local function loaderSource()
+	return string.format([[
+local ok, err = pcall(function()
+	local source = readfile(%q)
+	local chunk = loadstring(source)
+	if not chunk then error("loadstring failed") end
+	chunk()
+end)
+if not ok then warn("[AOTR] autoexec: " .. tostring(err)) end
+]], cfg.scriptPath)
+end
+
+rejoinNow = function(reason)
+	if S.rejoining then return end
+	S.rejoining = true
+	saveStats()
+	S.autoMsg = "rejoining: " .. tostring(reason)
+	say(S.autoMsg)
+	if cfg.autoExec and api.queue_on_teleport then pcall(api.queue_on_teleport, loaderSource()) end
+	task.spawn(function()
+		task.wait(0.4)
+		local ok = pcall(function() TeleportService:Teleport(PLACE) end)
+		if not ok then
+			ok = pcall(function() TeleportService:TeleportToPlaceInstance(PLACE, game.JobId) end)
+		end
+		if not ok then
+			S.rejoining = false
+			S.autoMsg = "rejoin failed (TeleportService refused)"
+			say(S.autoMsg)
+		end
+	end)
+	return true
+end
+
+local function installAutoExec()
+	if not api.writefile then return false, "this executor has no writefile" end
+	local folder = "autoexec"
+	if api.isfolder and not api.isfolder(folder) then
+		if api.makefolder then pcall(api.makefolder, folder) end
+	end
+	local path = folder .. "/aotr_delta.lua"
+	local ok = pcall(api.writefile, path, loaderSource())
+	if ok and api.queue_on_teleport then
+		pcall(api.queue_on_teleport, loaderSource())
+	end
+	return ok, path
+end
+
+resultHook = function(signature)
+	local info = resultsInfo()
+	local stateText = "?"
+	if info then
+		local label = info:FindFirstChild("State")
+		if label then
+			local ok, value = pcall(function() return label.Text end)
+			if ok and type(value) == "string" then stateText = value end
+		end
+	end
+
+	local interface = lp:FindFirstChild("PlayerGui")
+	interface = interface and interface:FindFirstChild("Interface")
+	local rewardsGui = interface and interface:FindFirstChild("Rewards")
+	local rewardText = rewardsGui and GuiAuto.labels(rewardsGui, 70) or ""
+	S.resultText = rewardText
+	S.resultState = stateText
+
+	local okType, roundType = pcall(function() return workspace:GetAttribute("Type") end)
+	local kind = normText(roundType or "")
+	local completed = string.find(string.upper(stateText), "COMPLET", 1, true) ~= nil
+	Stats.data.rounds = (Stats.data.rounds or 0) + 1
+	if completed then
+		if string.find(kind, "raid", 1, true) then
+			Stats.data.raids = (Stats.data.raids or 0) + 1
+		elseif string.find(kind, "wave", 1, true) then
+			Stats.data.waves = (Stats.data.waves or 0) + 1
+		else
+			Stats.data.missions = (Stats.data.missions or 0) + 1
+		end
+	end
+	saveStats()
+
+	if cfg.webhookRewards ~= "" then
+		webhookPush(cfg.webhookRewards, {
+			username = "AOTR Delta",
+			embeds = { embed(
+				string.upper(tostring(stateText)) .. " - " .. tostring(roundType or "round"),
+				rewardText ~= "" and rewardText:sub(1, 900) or "No reward text found.",
+				completed and 0x4ADE80 or 0xF87171,
+				{
+					{ name = "Kills", value = tostring(Stats.data.kills or 0), inline = true },
+					{ name = "Rounds", value = tostring(Stats.data.rounds or 0), inline = true },
+					{ name = "Player", value = lp.Name, inline = true },
+				}) },
+		})
+	end
+
+	local wantedSkin = normText(cfg.bossSkin)
+	local foundSkin = wantedSkin ~= "" and string.find(normText(rewardText), wantedSkin, 1, true) ~= nil
+	if foundSkin then
+		Stats.data.boss = (Stats.data.boss or 0) + 1
+		saveStats()
+		S.autoMsg = "boss skin obtained: " .. cfg.bossSkin
+		say(S.autoMsg)
+		if cfg.webhookRewards ~= "" then
+			webhookPush(cfg.webhookRewards, {
+				username = "AOTR Delta",
+				embeds = { embed("Boss skin obtained", cfg.bossSkin .. "\n" .. rewardText:sub(1, 700), 0xFBBF24,
+					{ { name = "Player", value = lp.Name, inline = true } }) },
+			})
+		end
+		cfg.autoRejoinBoss = false
+		if UI.bossToggle then UI.bossToggle:Set(false, true) end
+	elseif cfg.autoRejoinBoss then
+		if wantedSkin == "" then
+			S.autoMsg = "boss rejoin is on but no skin name is set"
+		else
+			rejoinNow("boss skin not in this reward list")
+			return true
+		end
+	end
+	return false
+end
+
+local function shadowStep(now)
+	if not cfg.shadowCheck then return end
+	if now - (S.shadowAt or 0) < 60 then return end
+	S.shadowAt = now
+	local findings = {}
+	local function scanAttributes(instance, label)
+		local ok, attributes = pcall(function() return instance:GetAttributes() end)
+		if not ok or type(attributes) ~= "table" then return end
+		for key, value in pairs(attributes) do
+			local flat = normText(key)
+			if string.find(flat, "ban", 1, true) or string.find(flat, "restrict", 1, true)
+				or string.find(flat, "suspend", 1, true) then
+				if value ~= nil and value ~= false then
+					findings[#findings + 1] = label .. "." .. key .. "=" .. tostring(value)
+				end
+			end
+		end
+	end
+	scanAttributes(lp, "player")
+	scanAttributes(workspace, "workspace")
+	scanAttributes(game, "game")
+	local playerGui = lp:FindFirstChild("PlayerGui")
+	if playerGui then
+		for _, instance in ipairs(playerGui:GetDescendants()) do
+			if instance:IsA("TextLabel") and guiVisible(instance) then
+				local ok, text = pcall(function() return instance.Text end)
+				if ok and type(text) == "string" then
+					local flat = normText(text)
+					if string.find(flat, "shadowban", 1, true) or string.find(flat, "banned", 1, true)
+						or string.find(flat, "suspended", 1, true) then
+						findings[#findings + 1] = "ui: " .. text:sub(1, 70)
+					end
+				end
+			end
+		end
+	end
+	if #Players:GetPlayers() <= 1 then
+		S.aloneSince = S.aloneSince or now
+		if now - S.aloneSince >= 180 then
+			findings[#findings + 1] = "no other players for 3+ minutes (possible shadow pool)"
+		end
+	else
+		S.aloneSince = nil
+	end
+	S.shadow = #findings == 0 and "clear" or table.concat(findings, " | ")
+	if #findings > 0 then
+		say("shadow check: " .. S.shadow)
+		if cfg.webhookStats ~= "" then
+			webhookPush(cfg.webhookStats, {
+				username = "AOTR Delta",
+				embeds = { embed("Shadow-ban check", S.shadow:sub(1, 900), 0xF87171,
+					{ { name = "Player", value = lp.Name, inline = true } }) },
+			})
+		end
+	end
+end
+
+--============================================================================
+--  LOOPS
+--============================================================================
+local startFarm, stopFarm, setFarm
+
+local function attackReady()
+	if not S.running or S.refilling or S.results then return false end
+	if cfg.focusGuard and not focused() then return false end
+	if uiBusy() then return false end
+	local target = S.target
+	if not target or dead(target.model) then return false end
+	if not S.dist then return false end
+	local reach = math.max(22, cfg.hoverClose + 12)
+	if S.dist > reach then return false end
+	return true
+end
+
+local function attackTick()
+	if not attackReady() then return end
+	if click() then
+		S.swings = S.swings + 1
+		-- the loop that measured 4 kills in 6 s tapped Space with every M1;
+		-- it is a tap, never a hold, so movement is unaffected
+		if cfg.pressSpace and api.keypress then
+			pcall(api.keypress, 0x20)
+			pcall(api.keyrelease, 0x20)
+		end
+	end
+end
+
+local function fastTick()
+	if not S.running then return end
+	local now = clock()
+
+	if cfg.focusGuard and not focused() then
+		local _, root = myChar()
+		local spot = safeSpot()
+		if root and spot then
+			pcall(function()
+				root.Position = spot
+				root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+			end)
+		end
+		releaseAll()
+		S.state = "window not focused - parked"
+		return
+	end
+
+	local char, root, humanoid = myChar()
+	if not root then
+		S.state = "no character"
+		S.target = nil
+		return
+	end
+	if humanoid and humanoid.Health <= 0 then
+		releaseAll()
+		S.state = "dead - waiting for respawn"
+		S.target = nil
+		return
+	end
+	if S.soloBlocked then
+		releaseAll()
+		S.state = "solo only - " .. tostring(#Players:GetPlayers()) .. " players in server"
+		return
+	end
+	if uiBusy() then
+		-- no synthetic mouse input here: the user may be dragging a slider with a
+		-- real finger, and a release would cancel that drag
+		S.state = "menu - farm paused"
+		return
+	end
+	if S.results then
+		S.state = "results screen - waiting for retry"
+		return
+	end
+	if S.refilling or now >= (S.nextRefillCheck or 0) then
+		S.nextRefillCheck = now + (S.refilling and 0.1 or 0.25)
+		if refillTick(now, root) then return end
+	end
+
+	spearsStep(now)
+	if cfg.autoEscape and isGrabbed() then
+		escapeStep(now)
+		S.state = "escaping a grab"
+		return
+	end
+	skillsStep(now)
+
+	local target = S.target
+	if target and dead(target.model) then
+		S.target = nil
+		target = nil
+	end
+	if not target then
+		S.target = chooseTarget()
+		target = S.target
+	end
+	if not target then
+		releaseAll()
+		S.state = "no titans in range"
+		return
+	end
+
+	local hrp = target.model:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		S.target = nil
+		return
+	end
+	local nape = target.nape
+	if not nape or not nape.Parent then
+		target.nape = napeOf(target.model)
+		nape = target.nape
+	end
+	if not nape then
+		S.state = "target has no nape"
+		return
+	end
+
+	local height = cfg.hover
+	local name = target.name
+	if name == "Attack_Titan" then
+		height = cfg.hoverAttack
+	else
+		local okType, titanType = pcall(function() return target.model:GetAttribute("Type") end)
+		if okType and (titanType == "Colossal" or titanType == "Stall") then
+			height = cfg.hoverBig
+		end
+	end
+
+	-- Tween travel: anything further than travelNear is flown to at a capped
+	-- speed instead of being snapped to. The last stretch is the existing
+	-- hover + magnet, so the attack still starts from the measured position.
+	if cfg.moveMode == "tween" then
+		if S.travelling then
+			S.state = "tweening to " .. tostring(name)
+			return
+		end
+		local flat = Vector3.new(root.Position.X - hrp.Position.X, 0, root.Position.Z - hrp.Position.Z).Magnitude
+		if flat > cfg.travelNear then
+			Move.travel(hrp.Position + Vector3.new(0, height, 0), cfg.travelSpeed)
+			S.state = "tweening to " .. tostring(name)
+			return
+		end
+	end
+
+	S.cluster = cfg.multiHit and clusterAt(target.model, root.Position) or 0
+
+	if cfg.magnet then
+		hoverAt(root, hrp.Position, height)
+		magnetTick(target, root)
+	else
+		-- no magnet: get close to the nape itself, or the blade cannot reach it
+		local okPos, napePos = pcall(function() return nape.Position end)
+		if okPos and napePos then hoverAt(root, napePos, cfg.hoverClose) end
+	end
+
+	-- group mode aims at the middle of the crowd, not at the target's own nape:
+	-- one spear explosion then covers every nape inside multiRadius
+	local aimPoint = nape.Position
+	if cfg.multiHit and (S.cluster or 0) >= cfg.multiMin then
+		local centre = clusterCentre(target.model)
+		if centre then aimPoint = centre end
+	end
+
+	local okDist, distance = pcall(function() return (aimPoint - root.Position).Magnitude end)
+	S.dist = okDist and distance or nil
+
+	S.aimTick = (S.aimTick or 0) + 1
+	if S.aimTick % 2 == 1 and okDist then
+		local camera = workspace.CurrentCamera
+		aimAt(root, camera, aimPoint)
+	end
+
+	S.state = "attacking " .. tostring(name)
+end
+
+local function slowTick()
+	local now = clock()
+
+	-- lifetime playtime, sampled from the slow loop so a background tab does
+	-- not inflate it with a long single frame
+	local delta = now - (S.lastSlow or now)
+	S.lastSlow = now
+	Stats.data.seconds = (Stats.data.seconds or 0) + math.max(0, delta)
+
+	if cfg.napeEnabled then
+		applyNapes()
+	else
+		S.napeParts = 0
+	end
+	pruneNapes()
+
+	local stat = nil
+	pcall(function() stat = tonumber(lp:GetAttribute("Stat")) end)
+	if stat ~= nil and S.statSeen ~= nil and stat > S.statSeen then
+		local gained = stat - S.statSeen
+		S.kills = S.kills + gained
+		Stats.data.kills = (Stats.data.kills or 0) + gained
+		local key = S.target and S.target.name or "unknown"
+		Stats.data.byType[key] = (Stats.data.byType[key] or 0) + gained
+	end
+	S.statSeen = stat
+
+	S.gas = gasPercent()
+	S.refills = refills()
+	S.bladesBroken = bladesAllBroken(lp.Character)
+
+	-- solo mode: pause (or hop) when somebody else is in the server
+	if cfg.soloOnly then
+		local count = #Players:GetPlayers()
+		S.soloBlocked = count > 1
+		if S.soloBlocked and cfg.soloAction == "hop" and now >= (S.soloHopAt or 0) then
+			S.soloHopAt = now + 12
+			rejoinNow("solo mode: " .. count .. " players")
+		end
+	else
+		S.soloBlocked = false
+	end
+
+	-- stuck fail-safe: the target is not getting closer and we are not flying
+	if cfg.stuckDetect and S.running and not S.results and S.target and not S.travelling
+		and not S.refilling then
+		local _, root = myChar()
+		local okDist, distance = pcall(function()
+			return (S.target.nape.Position - root.Position).Magnitude
+		end)
+		if okDist and distance and root then
+			if S.lastDist and distance > (S.lastDist - 1) then
+				S.stuckSince = S.stuckSince or now
+			else
+				S.stuckSince = now
+			end
+			S.lastDist = distance
+			if now - (S.stuckSince or now) > cfg.stuckTime then
+				S.stuckCount = (S.stuckCount or 0) + 1
+				S.stuckSince = now
+				S.lastDist = nil
+				S.target = nil
+				Move.cancel()
+				S.autoMsg = "stuck - retargeting (" .. S.stuckCount .. ")"
+				if cfg.autoRejoinStuck and S.stuckCount >= 3 then
+					S.stuckCount = 0
+					rejoinNow("stuck three times")
+				end
+			end
+		end
+	else
+		S.stuckSince, S.lastDist = nil, nil
+	end
+
+	local folder = workspace:FindFirstChild("Titans")
+	local alive = 0
+	if folder then
+		for _, model in ipairs(folder:GetChildren()) do
+			if model:IsA("Model") and not dead(model) then alive = alive + 1 end
+		end
+	end
+	S.alive = alive
+
+	if not S.rateAt then
+		S.rateAt, S.rateSwings = now, S.swings
+	end
+	if now - S.rateAt >= 1 then
+		S.rate = (S.swings - S.rateSwings) / (now - S.rateAt)
+		S.rateAt, S.rateSwings = now, S.swings
+	end
+
+	retryTick(now)
+
+	-- one modifier pass per lobby visit; a live round re-arms it for the next
+	if roundActive() then ModifierGate.done = false end
+	autoStartStep(now)
+	autoModifiersStep(now)
+	progressionStep(now)
+	familyStep(now)
+	shadowStep(now)
+
+	if now - (S.statsSavedAt or 0) > 60 then
+		S.statsSavedAt = now
+		saveStats()
+	end
+	if cfg.webhookStats ~= "" and cfg.statsInterval > 0
+		and now - (S.statsAt or now) >= cfg.statsInterval then
+		S.statsAt = now
+		webhookPush(cfg.webhookStats, {
+			username = "AOTR Delta",
+			embeds = { embed("Lifetime stats", "Running total for " .. lp.Name, 0x5BC0EB, statsFields()) },
+		})
+	end
+
+	refreshStatus()
+end
+
+-- The menu collapses to a 46px title bar in the top-left corner while a run
+-- is active: out of the way of the aim point, but still on screen so a touch
+-- user can reopen it and press Stop. F5 does the same with a keyboard.
+local uiPrev
+
+local function compactUI()
+	local win = UI.win
+	if not win then return end
+	local x, y = win:GetPosition()
+	uiPrev = { x = x, y = y, collapsed = win:IsCollapsed() and true or false }
+	if cfg.autoHideGui then
+		-- fully hidden: the floating button reopens it, and F5 still stops
+		win:SetFabVisible(true)
+		win:Hide()
+		return
+	end
+	win:SetFabVisible(false)
+	win:SetPosition(8, 8)
+	win:SetCollapsed(true)
+end
+
+local function restoreUI()
+	local win = UI.win
+	if not win then return end
+	win:SetCollapsed(uiPrev and uiPrev.collapsed or false)
+	if uiPrev then win:SetPosition(uiPrev.x, uiPrev.y) end
+	win:SetFabVisible(true)
+	win:Open()
+	uiPrev = nil
+end
+
+startFarm = function()
+	if S.running then return true end
+	local char, root = myChar()
+	if not root then
+		S.state = "no character - wait for the spawn"
+		syncFarmToggle()
+		refreshStatus()
+		return false, "no character"
+	end
+	if game.PlaceId ~= PLACE then
+		say("warning: place is " .. tostring(game.PlaceId) .. ", expected " .. tostring(PLACE))
+	end
+
+	S.running = true
+	S.runId = (S.runId or 0) + 1
+	local runId = S.runId
+	S.err = nil
+	S.results = false
+	S.refilling = false
+	S.retryTries, S.lastRetry, S.retrySig = 0, nil, nil
+	S.statSeen = nil
+	S.noTitanAt = nil
+	S.resultSeenSig = nil
+	S.stuckCount, S.stuckSince, S.lastDist = 0, nil, nil
+	S.statsAt = clock()
+	S.lastSlow = clock()
+	pcall(function() S.statSeen = tonumber(lp:GetAttribute("Stat")) end)
+	S.target = chooseTarget()
+	S.state = "starting"
+	Refill.tries, Refill.nextPress, Refill.until_ = 0, 0, 0
+	Visual.apply()
+
+	if api.setrobloxinput then pcall(api.setrobloxinput, true) end
+	-- see compactUI: the menu stays reachable, just out of the aim point
+	compactUI()
+	if UI.win then
+		UI.win:Notify({
+			Title = "Farming",
+			Content = "Menu collapsed to the top-left bar. Tap it to reopen, or press F5 with a keyboard.",
+			Duration = 5,
+		})
+	end
+
+	task.spawn(function()
+		while S.running and S.runId == runId do
+			local ok, err = pcall(fastTick)
+			if not ok then S.err = tostring(err) end
+			task.wait(cfg.tick)
+		end
+	end)
+	task.spawn(function()
+		while S.running and S.runId == runId do
+			local ok, err = pcall(attackTick)
+			if not ok then S.err = tostring(err) end
+			task.wait(1 / math.max(1, cfg.attackHz))
+		end
+	end)
+	task.spawn(function()
+		while S.running and S.runId == runId do
+			local ok, err = pcall(slowTick)
+			if not ok then S.err = tostring(err) end
+			task.wait(0.25)
+		end
+	end)
+
+	say("started")
+	syncFarmToggle()
+	refreshStatus()
+	return true
+end
+
+stopFarm = function()
+	if not S.running then
+		syncFarmToggle()
+		return false
+	end
+	S.running = false
+	S.target = nil
+	S.refilling = false
+	S.dist = nil
+	S.travelling = false
+	S.state = "stopped"
+	Move.cancel()
+	saveStats()
+	releaseAll()
+	if UI.win then restoreUI() end
+	if api.setrobloxinput then pcall(api.setrobloxinput, false) end
+	say("stopped")
+	syncFarmToggle()
+	refreshStatus()
+	return true
+end
+
+setFarm = function(on)
+	on = on == true
+	cfg.autoFarm = on
+	if on then return startFarm() end
+	return stopFarm()
+end
+
+-- assigned after the UI exists; guards keep the early calls harmless
+syncFarmToggle = function()
+	local toggle = UI.farmToggle
+	if toggle and toggle:Get() ~= S.running then
+		toggle:Set(S.running, true)
+	end
+end
+
+--============================================================================
+--  STATUS TEXT
+--============================================================================
+local GOOD = Color3.fromRGB(74, 222, 128)
+local BAD = Color3.fromRGB(248, 113, 113)
+
+local function statusLines()
+	local target = S.target
+	local lines = {
+		Vega.Rich.Bold("AOTR DELTA")
+			.. "  " .. Vega.Rich.Color(S.running and "RUNNING" or "STOPPED", S.running and GOOD or BAD),
+		"state: " .. tostring(S.state or "idle"),
+		string.format("target: %s   distance: %s",
+			target and tostring(target.name) or "none",
+			S.dist and string.format("%.0f st", S.dist) or "-"),
+		string.format("kills: %d (Stat)   swings: %d   rate: %.1f/s",
+			S.kills or 0, S.swings or 0, S.rate or 0),
+		string.format("alive: %s   gas: %s   sets: %s   napes: %d   group: %d",
+			tostring(S.alive or "-"),
+			S.gas and (tostring(S.gas) .. "%") or "-",
+			tostring(S.refills or "-"),
+			S.napeParts or 0, S.cluster or 0),
+		string.format("priority: %s   move: %s   hover: %.0f   magnet: %s",
+			tostring(cfg.priority), tostring(cfg.moveMode), cfg.hover, tostring(cfg.magnet)),
+		string.format("auto start: %s   difficulty: %s   solo: %s",
+			tostring(cfg.autoStartMode), tostring(cfg.difficulty), cfg.soloOnly and "on" or "off"),
+		string.format("raid next: %s   mastery target: %s",
+			(cfg.raidTypes and cfg.raidTypes[((S.raidIndex or 1) - 1) % math.max(1, #cfg.raidTypes) + 1]) or "-",
+			cfg.masteryTitan ~= "" and cfg.masteryTitan or "any"),
+		string.format("lifetime: %d missions, %d raids, %d waves, %d kills",
+			Stats.data.missions or 0, Stats.data.raids or 0, Stats.data.waves or 0, Stats.data.kills or 0),
+	}
+	if cfg.autoRejoinBoss then
+		lines[#lines + 1] = "boss skin watch: " .. (cfg.bossSkin ~= "" and cfg.bossSkin or "(set a name)")
+	end
+	if S.familyRarity then
+		lines[#lines + 1] = "family: " .. tostring(S.familyRarity)
+	end
+	if S.shadow then
+		lines[#lines + 1] = "shadow check: " .. tostring(S.shadow)
+	end
+	if S.autoMsg then
+		lines[#lines + 1] = "auto: " .. tostring(S.autoMsg)
+	end
+	if S.err then
+		lines[#lines + 1] = Vega.Rich.Color("last error: " .. tostring(S.err), BAD)
+	end
+	return lines
+end
+
+refreshStatus = function()
+	if not UI.status then return end
+	UI.status:Set(table.concat(statusLines(), "\n"))
+end
+
+--============================================================================
+--  SELFTEST / PANIC / DESTROY
+--============================================================================
+local function selftest()
+	local passed, failed, info = 0, 0, 0
+	local lines = {}
+
+	local function add(kind, label, detail)
+		if kind == "PASS" then passed = passed + 1
+		elseif kind == "FAIL" then failed = failed + 1
+		else info = info + 1 end
+		lines[#lines + 1] = string.format("%-4s %s%s", kind, label,
+			detail ~= nil and (" - " .. tostring(detail)) or "")
+	end
+
+	add(game.PlaceId == PLACE and "PASS" or "FAIL", "place", tostring(game.PlaceId) .. " (expected " .. PLACE .. ")")
+	add(UI.ready and "PASS" or "INFO", "Vega UI", UI.ready and "window built" or "headless / build failed")
+
+	local char, root, humanoid = myChar()
+	add(root and "PASS" or "FAIL", "character", char and char.Name)
+	add(humanoid and humanoid.Health > 0 and "PASS" or "INFO", "humanoid health", humanoid and humanoid.Health)
+
+	local titans = workspace:FindFirstChild("Titans")
+	add(titans and "PASS" or "INFO", "Titans folder", titans and #titans:GetChildren())
+	local target = chooseTarget()
+	add(target and "PASS" or "INFO", "target", target and target.name)
+	add(target and target.nape and "PASS" or "INFO", "nape path",
+		target and target.nape and target.nape:GetFullName())
+
+	local gas = gasPercent()
+	add(gas and "PASS" or "INFO", "gas HUD", gas and (tostring(gas) .. "%"))
+	local part = refillPart()
+	add(part and "PASS" or "FAIL", "gas station", part and part:GetFullName())
+	add((refills() or 0) > 0 and "PASS" or "INFO", "blade sets", refills())
+
+	local stat = nil
+	pcall(function() stat = tonumber(lp:GetAttribute("Stat")) end)
+	add(stat and "PASS" or "INFO", "Stat attribute", stat)
+
+	add(api.mouse1click and "PASS" or (api.mouse1press and "PASS" or "FAIL"), "attack input",
+		api.mouse1click and "mouse1click" or (api.mouse1press and "mouse1press" or "none"))
+	add(api.getconnections and "PASS" or "INFO", "getconnections", api.getconnections and "available" or "missing")
+	add(api.firesignal and "PASS" or "INFO", "firesignal", api.firesignal and "available" or "missing")
+	add(api.isexecutorclosure and "PASS" or "INFO", "isexecutorclosure", api.isexecutorclosure and "available" or "missing")
+	add(api.hookfunction and "PASS" or "INFO", "hookfunction", api.hookfunction and "available (not used)" or "missing")
+	add(api.keypress and "PASS" or "INFO", "keyboard input", api.keypress and "available" or "missing")
+	local retryButton = findResultsButton()
+	add(retryButton and "PASS" or "INFO", "Retry button", retryButton and retryButton:GetFullName())
+	add(resultsInfo() and "PASS" or "INFO", "results HUD", resultsInfo() and "present" or "not on results screen")
+
+	-- v3 paths
+	local tweenOk = pcall(function()
+		local probe = Instance.new("Frame")
+		local tween = TweenService:Create(probe, TweenInfo.new(0.1), { BackgroundTransparency = 1 })
+		return tween ~= nil
+	end)
+	add(tweenOk and "PASS" or "FAIL", "TweenService", tweenOk and "available" or "missing")
+	local httpFn = (type(request) == "function") or (type(http_request) == "function")
+	add(httpFn and "PASS" or "INFO", "HTTP for webhooks", httpFn and "available" or "missing (webhooks will report no http API)")
+	local httpUrl = cfg.webhookRewards ~= "" or cfg.webhookStats ~= ""
+	local webhookKind = "INFO"
+	if httpUrl then webhookKind = httpFn and "PASS" or "WARN" end
+	add(webhookKind, "webhook config", httpUrl and "URL set" or "no URL set")
+	local vimOk = pcall(function() return game:GetService("VirtualInputManager") end)
+	add(vimOk and "PASS" or "INFO", "VirtualInputManager", vimOk and "available (UI fallback click)" or "missing")
+	local panel, panelAlias = GuiAuto.findPanel(MODE_PANELS[cfg.autoStartMode] or { "mission", "raid", "wave" })
+	add(panel and "PASS" or "INFO", "auto-start panel", panel and (tostring(panel:GetFullName()) .. " via " .. tostring(panelAlias)) or "not open - open the mode once and rerun")
+	add(roundActive() and "PASS" or "INFO", "round detection", roundActive() and "a round is active" or "lobby / no round")
+	add(type(S.shadow) == "string" and "PASS" or "INFO", "shadow check", S.shadow or "not run yet")
+	local statsOk = api.writefile ~= nil
+	add(statsOk and "PASS" or "INFO", "stats file", statsOk and STATS_PATH or "no writefile; stats stay in memory")
+
+	for _, line in ipairs(lines) do say(line) end
+	S.state = string.format("self-test %d pass / %d fail / %d info", passed, failed, info)
+	if UI.status then UI.status:Set(table.concat(lines, "\n")) end
+	if UI.win then
+		UI.win:Notify({
+			Title = "Self-test",
+			Content = string.format("%d pass, %d fail, %d info - full result in the console (F9).", passed, failed, info),
+			Type = failed == 0 and "success" or "warning",
+			Duration = 8,
+		})
+	end
+	return lines, passed, failed, info
+end
+
+local function panic()
+	stopFarm()
+	local restored = restoreNapes()
+	releaseAll()
+	local _, root = myChar()
+	local spot = safeSpot()
+	if root and spot then
+		pcall(function()
+			root.Position = spot
+			root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+		end)
+	end
+	S.state = "panic - restored " .. tostring(restored) .. " napes"
+	refreshStatus()
+	return restored
+end
+
+local Farm = {}
+Farm.version = VERSION
+Farm.cfg = cfg
+
+function Farm.destroy()
+	pcall(stopFarm)
+	pcall(restoreNapes)
+	pcall(Move.cancel)
+	pcall(Visual.restore)
+	pcall(saveStats)
+	releaseAll()
+	UI.status = nil
+	if UI.win then
+		pcall(function() UI.win:Destroy() end)
+		UI.win = nil
+	end
+	if genv.AOTR_DELTA == Farm then genv.AOTR_DELTA = nil end
+	-- some builds expose _G as read-only, so this mirror is best-effort
+	if type(_G) == "table" and _G ~= genv and _G.AOTR_DELTA == Farm then
+		pcall(function() _G.AOTR_DELTA = nil end)
+	end
+	say("unloaded")
+end
+
+--============================================================================
+--  UI BUILD
+--============================================================================
+local function buildUI()
+	local win = Vega:CreateWindow({
+		Title = "AOTR Delta Farm",
+		Subtitle = "place " .. PLACE .. "  -  v" .. VERSION,
+		Width = 580,
+		Height = 430,
+		Theme = "Midnight",
+	})
+	UI.win = win
+
+	local farmTab = win:AddTab({ Title = "Farm" })
+	local control = farmTab:AddSection({ Title = "Control" })
+	control:AddButton({
+		Title = "Start farming",
+		Description = "Hover above the target, pull its nape onto you, click. F5 also toggles.",
+		Callback = function() setFarm(true) end,
+	})
+	control:AddButton({
+		Title = "Stop farming",
+		Description = "Stops every loop and releases mouse / R / Space / W.",
+		Callback = function() setFarm(false) end,
+	})
+	UI.farmToggle = control:AddToggle({
+		Title = "Auto farm",
+		Description = "Master switch. Deliberately has no config flag, so loading a preset never starts the farm.",
+		Default = false,
+		Callback = function(value)
+			cfg.autoFarm = value
+			if value then startFarm() else stopFarm() end
+		end,
+	})
+
+	local features = farmTab:AddSection({ Title = "Features" })
+	UI.napeToggle = features:AddToggle({
+		Title = "Nape extender",
+		Description = "Grows every nape within range by the multiplier below. Turning it off restores the remembered sizes.",
+		Default = true,
+		Flag = "nape",
+		Callback = function(value)
+			cfg.napeEnabled = value
+			if not value then restoreNapes() end
+		end,
+	})
+	UI.magnetToggle = features:AddToggle({
+		Title = "Nape magnet",
+		Description = "Re-asserts the target's nape on top of you every frame. This is what makes the click land; without it the farm hovers close instead.",
+		Default = true,
+		Flag = "magnet",
+		Callback = function(value) cfg.magnet = value end,
+	})
+	UI.spaceToggle = features:AddToggle({
+		Title = "Space with each swing",
+		Description = "Taps Space with every click, exactly like the loop that measured 4 kills in 6 seconds. Turn it off if you need Space for movement.",
+		Default = true,
+		Flag = "pressSpace",
+		Callback = function(value) cfg.pressSpace = value end,
+	})
+	UI.refillToggle = features:AddToggle({
+		Title = "Auto refill",
+		Description = "Parks on the camp gas tank and refills when gas is low or every blade is broken.",
+		Default = true,
+		Flag = "refill",
+		Callback = function(value)
+			cfg.refill = value
+			if not value then S.refilling = false end
+		end,
+	})
+	UI.retryToggle = features:AddToggle({
+		Title = "Auto retry",
+		Description = "Fires the results screen's own Retry button; falls back to the game's backslash / right / right / Enter navigation.",
+		Default = true,
+		Flag = "autoRetry",
+		Callback = function(value) cfg.autoRetry = value end,
+	})
+	UI.focusToggle = features:AddToggle({
+		Title = "Focus guard",
+		Description = "Parks the character and releases input when Roblox is not the active window.",
+		Default = true,
+		Flag = "focusGuard",
+		Callback = function(value) cfg.focusGuard = value end,
+	})
+	UI.uiGuardToggle = features:AddToggle({
+		Title = "Pause while menu open",
+		Description = "Stops clicking while the expanded menu is open, so a synthetic click cannot press its own controls. Starting the farm collapses the menu to its title bar at the top-left.",
+		Default = true,
+		Flag = "uiGuard",
+		Callback = function(value) cfg.uiGuard = value end,
+	})
+
+	local statusSection = farmTab:AddSection({ Title = "Live status" })
+	UI.status = statusSection:AddParagraph({
+		Title = "Idle.",
+		Description = "Refreshes four times a second while the farm runs.",
+		RichText = true,
+	})
+
+	--====================================================================
+	--  COMBAT
+	--====================================================================
+	local combatTab = win:AddTab({ Title = "Combat" })
+	local group = combatTab:AddSection({ Title = "Group hits" })
+	group:AddToggle({
+		Title = "Smart group targeting",
+		Description = "Picks the titan with the most other napes around it instead of the closest one, so one swing lands on a crowd.",
+		Default = true, Flag = "multiHit",
+		Callback = function(value) cfg.multiHit = value end,
+	})
+	group:AddSlider({
+		Title = "Group radius", Min = 8, Max = 60, Default = 22, Step = 1, Suffix = " st",
+		Flag = "multiRadius", Callback = function(value) cfg.multiRadius = value end,
+	})
+	group:AddSlider({
+		Title = "Minimum group size", Min = 2, Max = 8, Default = 3, Step = 1,
+		Flag = "multiMin", Callback = function(value) cfg.multiMin = value end,
+	})
+
+	local skills = combatTab:AddSection({ Title = "Skills and escape" })
+	skills:AddToggle({
+		Title = "Auto skill usage",
+		Description = "Taps every key in the list below while a target is alive. Off by default because a wrong key can dash you away from the nape.",
+		Default = false, Flag = "autoSkills",
+		Callback = function(value) cfg.autoSkills = value end,
+	})
+	skills:AddTextbox({
+		Title = "Skill keys",
+		Description = "Comma list of single keys to tap, in order.",
+		Placeholder = "Q,E,F,G",
+		Default = "Q,E,F,G,C,V,X,Z",
+		Flag = "skillKeys",
+		Callback = function(value) cfg.skillKeys = value; Skill.codes = nil end,
+	})
+	skills:AddSlider({
+		Title = "Skill interval", Min = 0.25, Max = 3, Default = 0.6, Step = 0.05, Decimals = 2, Suffix = "s",
+		Flag = "skillDelay", Callback = function(value) cfg.skillDelay = value end,
+	})
+	skills:AddToggle({
+		Title = "Auto escape grabs",
+		Description = "When the game says you are grabbed (a mash / escape prompt is visible), alternates A and D and clicks.",
+		Default = true, Flag = "autoEscape",
+		Callback = function(value) cfg.autoEscape = value end,
+	})
+
+	local ammo = combatTab:AddSection({ Title = "Ammo and reload" })
+	ammo:AddToggle({
+		Title = "Infinite spear ammo (client)",
+		Description = "Tops up numeric Ammo / Charge / Count values on every spear tool once a second. Client-side only; the server may still reject a throw.",
+		Default = false, Flag = "infiniteSpears",
+		Callback = function(value) cfg.infiniteSpears = value end,
+	})
+	ammo:AddToggle({
+		Title = "Auto reload blades",
+		Description = "Treat a fully broken blade set as a reason to refill, not only low gas.",
+		Default = true, Flag = "autoReload",
+		Callback = function(value) cfg.autoReload = value end,
+	})
+
+	--====================================================================
+	--  AUTOMATION
+	--====================================================================
+	local autoTab = win:AddTab({ Title = "Automation" })
+	local rounds = autoTab:AddSection({ Title = "Rounds" })
+	rounds:AddDropdown({
+		Title = "Auto start",
+		Description = "After the results screen (and on load) opens this panel and presses Start. Needs the farm running.",
+		Options = { "None", "Missions", "Raids", "Waves", "Mastery" },
+		Default = "None", Flag = "autoStartMode",
+		Callback = function(value)
+			cfg.autoStartMode = string.lower(value)
+			Auto.next = 0
+		end,
+	})
+	rounds:AddDropdown({
+		Title = "Raid types to rotate",
+		Description = "Every started raid takes the next entry. Applies to Auto start = Raids.",
+		Options = { "Attack", "Armored", "Female", "Colossal" },
+		Default = { "Attack", "Armored", "Female", "Colossal" },
+		Multi = true, Flag = "raidTypes",
+		Callback = function(value)
+			if type(value) == "table" and #value > 0 then cfg.raidTypes = value end
+		end,
+	})
+	rounds:AddToggle({
+		Title = "Rotate raid types",
+		Description = "Off keeps picking the first entry (or the one already selected in the panel).",
+		Default = true, Flag = "raidRotate",
+		Callback = function(value) cfg.raidRotate = value end,
+	})
+	rounds:AddDropdown({
+		Title = "Difficulty",
+		Description = "Hardest picks the highest difficulty the panel actually offers.",
+		Options = { "Hardest", "Easy", "Normal", "Hard", "Aberrant", "Freedom" },
+		Default = "Hardest", Flag = "difficulty",
+		Callback = function(value) cfg.difficulty = value end,
+	})
+	rounds:AddTextbox({
+		Title = "Mastery titan",
+		Description = "Only target titans whose name contains this. Empty targets everything. Used by Auto start = Mastery, but works in any mode.",
+		Placeholder = "Armored, Female",
+		Default = "", Flag = "masteryTitan",
+		Callback = function(value) cfg.masteryTitan = value end,
+	})
+	rounds:AddToggle({
+		Title = "Auto modifiers",
+		Description = "Clicks every modifier card once per lobby visit. The exclusion list keeps the ones you refuse.",
+		Default = false, Flag = "autoModifiers",
+		Callback = function(value)
+			cfg.autoModifiers = value
+			if value then ModifierGate.done = false end
+		end,
+	})
+	rounds:AddTextbox({
+		Title = "Modifier exclusions",
+		Description = "Comma list of modifier names to leave unclicked.",
+		Placeholder = "Titan Shift, Fog",
+		Default = "", Flag = "modifierExclude",
+		Callback = function(value) cfg.modifierExclude = value end,
+	})
+
+	local bossSection = autoTab:AddSection({ Title = "Boss skin and solo" })
+	UI.bossToggle = bossSection:AddToggle({
+		Title = "Rejoin until boss skin",
+		Description = "On the results screen, looks for the skin name below in the reward text. Not found: rejoin the place instead of retrying.",
+		Default = false, Flag = "autoRejoinBoss",
+		Callback = function(value) cfg.autoRejoinBoss = value end,
+	})
+	bossSection:AddTextbox({
+		Title = "Boss skin name",
+		Description = "Exact reward text to look for, e.g. the skin's item name.",
+		Placeholder = "Eren, Winged",
+		Default = "", Flag = "bossSkin",
+		Callback = function(value) cfg.bossSkin = value end,
+	})
+	bossSection:AddToggle({
+		Title = "Solo only mode",
+		Description = "Pauses the farm while another player is in the server.",
+		Default = false, Flag = "soloOnly",
+		Callback = function(value) cfg.soloOnly = value end,
+	})
+	bossSection:AddDropdown({
+		Title = "When someone joins",
+		Description = "Pause keeps you in place. Hop teleports to a fresh server.",
+		Options = { "Pause", "Hop" },
+		Default = "Pause", Flag = "soloAction",
+		Callback = function(value) cfg.soloAction = string.lower(value) end,
+	})
+
+	--====================================================================
+	--  PROGRESSION
+	--====================================================================
+	local progTab = win:AddTab({ Title = "Progression" })
+	local tree = progTab:AddSection({ Title = "Skill tree" })
+	tree:AddToggle({
+		Title = "Auto unlock skill tree",
+		Description = "Clicks unlockable nodes whenever the lobby is idle. Priority names are tried first, then the first available node.",
+		Default = false, Flag = "autoSkillTree",
+		Callback = function(value) cfg.autoSkillTree = value end,
+	})
+	tree:AddTextbox({
+		Title = "Priority nodes",
+		Description = "Comma list of node names to unlock before anything else.",
+		Placeholder = "Damage, Speed",
+		Default = "", Flag = "skillPriority",
+		Callback = function(value) cfg.skillPriority = value end,
+	})
+
+	local perks = progTab:AddSection({ Title = "Perks" })
+	perks:AddToggle({
+		Title = "Auto equip perks",
+		Description = "Presses the first available Equip button in the perk panel every other second.",
+		Default = false, Flag = "autoEquipPerks",
+		Callback = function(value) cfg.autoEquipPerks = value end,
+	})
+	perks:AddToggle({
+		Title = "Auto enhance perks",
+		Description = "Presses Enhance on perk cards that offer it.",
+		Default = false, Flag = "enhancePerks",
+		Callback = function(value) cfg.enhancePerks = value end,
+	})
+	perks:AddToggle({
+		Title = "Enhance every card",
+		Description = "Four enhance presses per pass instead of one. Stops when the panel stops offering the button.",
+		Default = false, Flag = "enhanceAllPerks",
+		Callback = function(value) cfg.enhanceAllPerks = value end,
+	})
+	perks:AddTextbox({
+		Title = "Sell these perks",
+		Description = "Comma list. Empty never sells anything; a card must match a name here before its Sell button is pressed.",
+		Placeholder = "Common, Uncommon",
+		Default = "", Flag = "sellPerks",
+		Callback = function(value) cfg.sellPerks = value end,
+	})
+
+	local misc = progTab:AddSection({ Title = "Slot, prestige, boosts" })
+	misc:AddDropdown({
+		Title = "Auto select slot",
+		Description = "Clicks that slot once per session, in the lobby only.",
+		Options = { "Off", "1", "2", "3", "4", "5", "6" },
+		Default = "Off", Flag = "autoSlot",
+		Callback = function(value)
+			cfg.autoSlot = tonumber(value) or 0
+			S.slotDone = false
+		end,
+	})
+	misc:AddToggle({
+		Title = "Auto prestige",
+		Description = "Presses Prestige and its confirm button in the lobby.",
+		Default = false, Flag = "autoPrestige",
+		Callback = function(value) cfg.autoPrestige = value end,
+	})
+	misc:AddToggle({
+		Title = "Auto use boosts",
+		Description = "Uses boost cards matching the list below.",
+		Default = false, Flag = "autoBoosts",
+		Callback = function(value) cfg.autoBoosts = value end,
+	})
+	misc:AddTextbox({
+		Title = "Boost names",
+		Description = "Comma list; empty means every boost card found.",
+		Placeholder = "2x XP, Damage",
+		Default = "", Flag = "boostNames",
+		Callback = function(value) cfg.boostNames = value end,
+	})
+	misc:AddToggle({
+		Title = "Buy boosts",
+		Description = "Buys a boost card when the Use path finds one that is not owned. Spends currency.",
+		Default = false, Flag = "buyBoosts",
+		Callback = function(value) cfg.buyBoosts = value end,
+	})
+
+	local loot = progTab:AddSection({ Title = "Crates and achievements" })
+	loot:AddToggle({
+		Title = "Auto open crates",
+		Description = "Presses Open / Open All in a crates panel, twice per pass.",
+		Default = false, Flag = "autoCrates",
+		Callback = function(value) cfg.autoCrates = value end,
+	})
+	loot:AddToggle({
+		Title = "Auto claim achievements",
+		Description = "Presses every Claim button in the achievements panel.",
+		Default = false, Flag = "autoAchievements",
+		Callback = function(value) cfg.autoAchievements = value end,
+	})
+
+	--====================================================================
+	--  FAMILY + WEBHOOKS
+	--====================================================================
+	local netTab = win:AddTab({ Title = "Family / Web" })
+	local family = netTab:AddSection({ Title = "Family" })
+	UI.familyToggle = family:AddToggle({
+		Title = "Auto roll family",
+		Description = "Rolls in the lobby, stops on a target (or any Mythical when the list is empty) and stores it.",
+		Default = false, Flag = "autoFamily",
+		Callback = function(value) cfg.autoFamily = value end,
+	})
+	family:AddTextbox({
+		Title = "Target families",
+		Description = "Comma list of family names. Empty means: stop on any Mythical.",
+		Placeholder = "Ackerman, Yeager",
+		Default = "", Flag = "familyTargets",
+		Callback = function(value) cfg.familyTargets = value end,
+	})
+	family:AddToggle({
+		Title = "Store the family",
+		Description = "Presses Store / Save on the roll you keep.",
+		Default = true, Flag = "storeFamily",
+		Callback = function(value) cfg.storeFamily = value end,
+	})
+	family:AddSlider({
+		Title = "Stop below coins", Min = 0, Max = 1000000, Default = 0, Step = 1000,
+		Flag = "familyMinCoins", Callback = function(value) cfg.familyMinCoins = value end,
+	})
+
+	local hooks = netTab:AddSection({ Title = "Webhooks" })
+	hooks:AddTextbox({
+		Title = "Reward / completion webhook",
+		Description = "Discord webhook URL. Posts the results state, reward text and lifetime counters.",
+		Placeholder = "https://discord.com/api/webhooks/...",
+		Default = "", Flag = "webhookRewards",
+		Callback = function(value) cfg.webhookRewards = value end,
+	})
+	hooks:AddTextbox({
+		Title = "Mythical family webhook",
+		Description = "Posted when a Mythical (or a target family) is rolled.",
+		Placeholder = "https://discord.com/api/webhooks/...",
+		Default = "", Flag = "webhookMythical",
+		Callback = function(value) cfg.webhookMythical = value end,
+	})
+	hooks:AddTextbox({
+		Title = "Lifetime stats webhook",
+		Description = "Periodic embed with missions, raids, waves, kills, boss skins and playtime.",
+		Placeholder = "https://discord.com/api/webhooks/...",
+		Default = "", Flag = "webhookStats",
+		Callback = function(value) cfg.webhookStats = value end,
+	})
+	hooks:AddSlider({
+		Title = "Stats interval", Min = 0, Max = 1800, Default = 300, Step = 60, Suffix = "s",
+		Flag = "statsInterval", Callback = function(value) cfg.statsInterval = value end,
+	})
+	hooks:AddButton({
+		Title = "Send test webhook",
+		Description = "Posts a single test embed to the reward webhook so you can check the URL.",
+		Callback = function()
+			local ok, detail = webhookPush(cfg.webhookRewards, {
+				username = "AOTR Delta",
+				embeds = { embed("Test", "If you can read this, the webhook works.", 0x4ADE80,
+					{ { name = "Place", value = tostring(game.PlaceId), inline = true } }) },
+			})
+			win:Notify({
+				Title = ok and "Queued" or "Not queued",
+				Content = ok and "The test embed is on its way." or tostring(detail),
+				Type = ok and "success" or "warning",
+			})
+		end,
+	})
+
+	--====================================================================
+	--  VISUALS + SAFETY
+	--====================================================================
+	local visTab = win:AddTab({ Title = "Visuals / Safety" })
+	local moveSection = visTab:AddSection({ Title = "Movement" })
+	moveSection:AddDropdown({
+		Title = "Movement mode",
+		Description = "Tween flies you at a capped speed (anti-cheat friendly). Hover is the measured instant flight. Teleport is a direct CFrame write.",
+		Options = { "Tween", "Hover", "Teleport" },
+		Default = "Tween", Flag = "moveMode",
+		Callback = function(value) cfg.moveMode = string.lower(value) end,
+	})
+	moveSection:AddSlider({
+		Title = "Tween speed", Min = 60, Max = 600, Default = 220, Step = 10, Suffix = " st/s",
+		Flag = "travelSpeed", Callback = function(value) cfg.travelSpeed = value end,
+	})
+	moveSection:AddSlider({
+		Title = "Hover takeover", Min = 20, Max = 300, Default = 90, Step = 5, Suffix = " st",
+		Flag = "travelNear", Callback = function(value) cfg.travelNear = value end,
+	})
+
+	local render = visTab:AddSection({ Title = "Rendering" })
+	UI.vis3d = render:AddToggle({
+		Title = "Disable 3D rendering",
+		Description = "RunService:Set3dRenderingEnabled(false). The menu and game UI stay drawn; the world stops rendering.",
+		Default = false, Flag = "disable3D",
+		Callback = function(value) cfg.disable3D = value; Visual.apply() end,
+	})
+	UI.visPerf = render:AddToggle({
+		Title = "Performance mode",
+		Description = "Shadows off, quality level 1 and a 30 FPS cap where the executor supports it.",
+		Default = false, Flag = "performance",
+		Callback = function(value) cfg.performance = value; Visual.apply() end,
+	})
+	UI.visFog = render:AddToggle({
+		Title = "Remove fog",
+		Description = "Pushes FogStart / FogEnd out and zeroes Atmosphere density.",
+		Default = false, Flag = "removeFog",
+		Callback = function(value) cfg.removeFog = value; Visual.apply() end,
+	})
+	render:AddToggle({
+		Title = "Auto hide menu",
+		Description = "Fully hides the menu while farming instead of collapsing it. The floating button reopens it.",
+		Default = false, Flag = "autoHideGui",
+		Callback = function(value) cfg.autoHideGui = value end,
+	})
+	render:AddButton({
+		Title = "Restore visuals",
+		Description = "Puts fog, shadows, atmosphere and 3D rendering back to the values saved when they were changed.",
+		Callback = function()
+			cfg.disable3D, cfg.performance, cfg.removeFog = false, false, false
+			if UI.vis3d then UI.vis3d:Set(false, true) end
+			if UI.visPerf then UI.visPerf:Set(false, true) end
+			if UI.visFog then UI.visFog:Set(false, true) end
+			Visual.restore()
+			win:Notify({ Title = "Visuals restored", Content = "Rendering settings are back to stock.", Type = "success" })
+		end,
+	})
+
+	local safety = visTab:AddSection({ Title = "Safety" })
+	safety:AddToggle({
+		Title = "Stuck detector",
+		Description = "If the target stops getting closer for the time below, retargets (and optionally rejoins).",
+		Default = true, Flag = "stuckDetect",
+		Callback = function(value) cfg.stuckDetect = value end,
+	})
+	safety:AddSlider({
+		Title = "Stuck after", Min = 2, Max = 20, Default = 5, Step = 1, Suffix = "s",
+		Flag = "stuckTime", Callback = function(value) cfg.stuckTime = value end,
+	})
+	safety:AddToggle({
+		Title = "Rejoin after 3 stucks",
+		Description = "Last resort when the titan is unreachable (inside geometry, for example).",
+		Default = false, Flag = "autoRejoinStuck",
+		Callback = function(value) cfg.autoRejoinStuck = value end,
+	})
+	safety:AddToggle({
+		Title = "Shadow-ban check",
+		Description = "Heuristic: scans player / game attributes and visible UI for ban flags, and warns when the server has no other players. It cannot prove a shadow ban.",
+		Default = false, Flag = "shadowCheck",
+		Callback = function(value) cfg.shadowCheck = value; S.shadowAt = 0 end,
+	})
+	safety:AddButton({
+		Title = "Run shadow check now",
+		Description = "Runs the heuristic immediately and prints the findings to the console.",
+		Callback = function()
+			S.shadowAt = 0
+			shadowStep(clock())
+			win:Notify({ Title = "Shadow check", Content = tostring(S.shadow or "no result"), Type = "info", Duration = 10 })
+		end,
+	})
+	safety:AddToggle({
+		Title = "Auto-execute on join",
+		Description = "Writes the loader into the executor's autoexec folder and queues it for the next teleport.",
+		Default = false, Flag = "autoExec",
+		Callback = function(value)
+			cfg.autoExec = value
+			if value then
+				local ok, detail = installAutoExec()
+				win:Notify({
+					Title = ok and "Auto-exec installed" or "Auto-exec failed",
+					Content = tostring(detail),
+					Type = ok and "success" or "warning",
+				})
+			end
+		end,
+	})
+	safety:AddTextbox({
+		Title = "Script path",
+		Description = "Path readfile can open from the autoexec loader.",
+		Placeholder = "aotr_delta_farm.lua",
+		Default = "aotr_delta_farm.lua", Flag = "scriptPath",
+		Callback = function(value) cfg.scriptPath = value end,
+	})
+	safety:AddButton({
+		Title = "Install auto-execute",
+		Description = "Writes autoexec/aotr_delta.lua now.",
+		Callback = function()
+			local ok, detail = installAutoExec()
+			win:Notify({
+				Title = ok and "Auto-exec installed" or "Install failed",
+				Content = tostring(detail),
+				Type = ok and "success" or "warning",
+			})
+		end,
+	})
+	safety:AddButton({
+		Title = "Rejoin now",
+		Description = "Saves stats and teleports back into the place.",
+		Callback = function() rejoinNow("manual") end,
+	})
+
+	--====================================================================
+	--  TUNING
+	--====================================================================
+	local tuningTab = win:AddTab({ Title = "Tuning" })
+	local approach = tuningTab:AddSection({ Title = "Approach" })
+	approach:AddSlider({
+		Title = "Hover height", Min = 40, Max = 260, Default = 120, Step = 5, Suffix = " st",
+		Flag = "hover", Callback = function(value) cfg.hover = value end,
+	})
+	approach:AddSlider({
+		Title = "Attack Titan hover", Min = 40, Max = 320, Default = 160, Step = 5, Suffix = " st",
+		Flag = "hoverAttack", Callback = function(value) cfg.hoverAttack = value end,
+	})
+	approach:AddSlider({
+		Title = "Big titan hover", Min = 40, Max = 360, Default = 200, Step = 5, Suffix = " st",
+		Flag = "hoverBig", Callback = function(value) cfg.hoverBig = value end,
+	})
+	approach:AddSlider({
+		Title = "Hover (magnet off)", Min = 5, Max = 60, Default = 14, Step = 1, Suffix = " st",
+		Flag = "hoverClose", Callback = function(value) cfg.hoverClose = value end,
+	})
+	approach:AddSlider({
+		Title = "Attack rate", Min = 2, Max = 30, Default = 10, Step = 1, Suffix = "/s",
+		Flag = "attackHz", Callback = function(value) cfg.attackHz = value end,
+	})
+
+	local napeSection = tuningTab:AddSection({ Title = "Napes" })
+	napeSection:AddSlider({
+		Title = "Nape multiplier", Min = 1, Max = 10, Default = 4, Step = 0.5, Decimals = 1, Suffix = "x",
+		Flag = "napeMult", Callback = function(value) cfg.napeMult = value end,
+	})
+	napeSection:AddSlider({
+		Title = "Nape range", Min = 100, Max = 2000, Default = 900, Step = 50,
+		Flag = "napeRange", Callback = function(value) cfg.napeRange = value end,
+	})
+	napeSection:AddSlider({
+		Title = "Magnet size", Min = 4, Max = 30, Default = 12, Step = 1, Suffix = " st",
+		Flag = "magnetSize", Callback = function(value) cfg.magnetSize = value end,
+	})
+
+	local refillSection = tuningTab:AddSection({ Title = "Refill" })
+	refillSection:AddSlider({
+		Title = "Refill at gas", Min = 0, Max = 80, Default = 25, Step = 5, Suffix = "%",
+		Flag = "refillGas", Callback = function(value) cfg.refillGas = value end,
+	})
+	refillSection:AddSlider({
+		Title = "Retry cooldown", Min = 5, Max = 120, Default = 25, Step = 5, Suffix = "s",
+		Flag = "retryCooldown", Callback = function(value) cfg.retryCooldown = value end,
+	})
+
+	local methods = tuningTab:AddSection({ Title = "Methods" })
+	methods:AddDropdown({
+		Title = "Target priority",
+		Description = "Attack Titan first, closest titan, or the lowest-health titan.",
+		Options = { "Nearest", "Attack Titan", "Lowest HP" },
+		Default = "Nearest",
+		Flag = "priority",
+		Callback = function(value)
+			if value == "Attack Titan" then cfg.priority = "attack"
+			elseif value == "Lowest HP" then cfg.priority = "hp"
+			else cfg.priority = "nearest" end
+		end,
+	})
+	methods:AddDropdown({
+		Title = "Refill method",
+		Description = "Auto tries ProximityPrompt, then touch, then R. Pick one to force it.",
+		Options = { "Auto", "R key", "ProximityPrompt", "Touch" },
+		Default = "Auto",
+		Flag = "refillMethod",
+		Callback = function(value)
+			if value == "R key" then cfg.refillMethod = "key"
+			elseif value == "ProximityPrompt" then cfg.refillMethod = "prompt"
+			elseif value == "Touch" then cfg.refillMethod = "touch"
+			else cfg.refillMethod = "auto" end
+		end,
+	})
+
+	--====================================================================
+	--  TOOLS
+	--====================================================================
+	local toolsTab = win:AddTab({ Title = "Tools" })
+	local actions = toolsTab:AddSection({ Title = "Actions" })
+	actions:AddButton({
+		Title = "Restore napes",
+		Description = "Writes every remembered stock nape size back.",
+		Callback = function()
+			local restored = restoreNapes()
+			win:Notify({ Title = "Napes restored", Content = tostring(restored) .. " parts written back.", Type = "success" })
+			refreshStatus()
+		end,
+	})
+	actions:AddButton({
+		Title = "Retry now",
+		Description = "Fires the Retry button even if the auto-retry cooldown has not elapsed. Refuses outside the results screen.",
+		Callback = function()
+			task.spawn(function()
+				local ok, sent, how = pcall(pressRetry, false)
+				local message = ok and sent and "Retry via " .. tostring(how)
+					or tostring(ok and how or sent)
+				win:Notify({
+					Title = ok and sent and "Retry sent" or "Retry not sent",
+					Content = message,
+					Type = ok and sent and "success" or "warning",
+				})
+			end)
+		end,
+	})
+	actions:AddButton({
+		Title = "Self-test",
+		Description = "Checks place, character, nape path, HUD, gas station, Stat and every executor function. Prints PASS / FAIL / INFO.",
+		Callback = function() selftest() end,
+	})
+	actions:AddButton({
+		Title = "Dump UI tree",
+		Description = "Prints every visible button (name + text) to the console. Use this when an automation action says 'button not found'.",
+		Callback = function()
+			local count = GuiAuto.dump()
+			win:Notify({ Title = "UI dumped", Content = tostring(count) .. " visible buttons - see F9.", Type = "info", Duration = 8 })
+		end,
+	})
+	actions:AddButton({
+		Title = "Reset lifetime stats",
+		Description = "Zeroes the saved counters. The current session keeps counting from zero.",
+		Danger = true,
+		Callback = function()
+			local started = Stats.data.started
+			Stats.data = { missions = 0, raids = 0, waves = 0, rounds = 0, kills = 0,
+				boss = 0, mythical = 0, seconds = 0, byType = {}, started = started or os.time() }
+			saveStats()
+			refreshStatus()
+			win:Notify({ Title = "Stats reset", Content = "Lifetime counters are zero.", Type = "warning" })
+		end,
+	})
+	actions:AddButton({
+		Title = "Rejoin place",
+		Description = "Saves stats first, then teleports back in.",
+		Callback = function() rejoinNow("manual") end,
+	})
+	actions:AddButton({
+		Title = "Copy status",
+		Description = "Copies the live status block to the clipboard.",
+		Callback = function()
+			local ok = Vega.Copy(table.concat(statusLines(), "\n"))
+			win:Notify({
+				Title = ok and "Copied" or "Clipboard unavailable",
+				Content = ok and "Status block is on the clipboard." or "This Delta build exposes no clipboard API.",
+				Type = ok and "success" or "warning",
+			})
+		end,
+	})
+	actions:AddButton({
+		Title = "Panic: stop + park",
+		Description = "Stops the farm, restores every nape, releases input and puts you on the gas tank or spawn.",
+		Danger = true,
+		Callback = function()
+			local restored = panic()
+			win:Notify({ Title = "Panic", Content = "Stopped and restored " .. tostring(restored) .. " napes.", Type = "warning" })
+		end,
+	})
+	actions:AddButton({
+		Title = "Unload menu + script",
+		Description = "Destroys the window and clears _G.AOTR_DELTA.",
+		Callback = function()
+			Farm.destroy()
+		end,
+	})
+
+	local keys = toolsTab:AddSection({ Title = "Hotkeys" })
+	keys:AddKeybind({
+		Title = "Farm on / off",
+		Default = Enum.KeyCode.F5,
+		Callback = function() setFarm(not S.running) end,
+	})
+	keys:AddKeybind({
+		Title = "Nape extender",
+		Default = Enum.KeyCode.F6,
+		Callback = function()
+			if UI.napeToggle then UI.napeToggle:Set(not cfg.napeEnabled) end
+		end,
+	})
+	keys:AddKeybind({
+		Title = "Panic",
+		Default = Enum.KeyCode.F7,
+		Callback = function() panic() end,
+	})
+
+	--====================================================================
+	--  CONFIG
+	--====================================================================
+	local configTab = win:AddTab({ Title = "Config" })
+	local presets = configTab:AddSection({ Title = "Presets" })
+	local configName = "aotr_delta"
+
+	presets:AddTextbox({
+		Title = "File name",
+		Placeholder = "aotr_delta",
+		Default = configName,
+		Callback = function(value)
+			local name = tostring(value or "")
+			if name ~= "" then configName = name end
+		end,
+	})
+	presets:AddButton({
+		Title = "Save settings",
+		Description = "Writes Vega/" .. configName .. ".json in the executor workspace.",
+		Callback = function()
+			local ok, detail = win:SaveConfig(configName)
+			win:Notify({
+				Title = ok and "Config saved" or "Save failed",
+				Content = tostring(detail),
+				Type = ok and "success" or "error",
+			})
+		end,
+	})
+	presets:AddButton({
+		Title = "Load settings",
+		Description = "Applies every saved tuning value. The farm itself is not started by a load.",
+		Callback = function()
+			local ok, detail = win:LoadConfig(configName)
+			if ok then
+				win:Notify({ Title = "Config loaded", Content = tostring(detail), Type = "success" })
+			else
+				win:Notify({ Title = "Load failed", Content = tostring(detail), Type = "error" })
+			end
+			refreshStatus()
+		end,
+	})
+	presets:AddButton({
+		Title = "Delete settings",
+		Description = "Removes the saved JSON for the current file name.",
+		Callback = function()
+			local ok, detail = win:DeleteConfig(configName)
+			win:Notify({
+				Title = ok and "Config deleted" or "Delete failed",
+				Content = tostring(detail),
+				Type = ok and "success" or "warning",
+			})
+		end,
+	})
+	presets:AddButton({
+		Title = "Copy config JSON",
+		Description = "Puts the current settings on the clipboard.",
+		Callback = function()
+			local ok = Vega.Copy(win:ExportConfig())
+			win:Notify({
+				Title = ok and "Copied" or "Clipboard unavailable",
+				Content = ok and "Config JSON is on the clipboard." or "No clipboard API in this build.",
+				Type = ok and "success" or "warning",
+			})
+		end,
+	})
+
+	local appearance = configTab:AddSection({ Title = "Appearance" })
+	appearance:AddDropdown({
+		Title = "Theme",
+		Options = Vega.ThemeNames,
+		Default = "Midnight",
+		Callback = function(value) win:SetTheme(value) end,
+	})
+
+	UI.ready = true
+	win:Notify({
+		Title = "AOTR Delta Farm",
+		Content = "Start farming when you are in a mission. Self-test in Tools checks every path.",
+		Type = "info",
+		Duration = 7,
+	})
+	return win
+end
+
+local built, buildError = pcall(buildUI)
+if not built then
+	warn("[AOTR-Delta] UI build failed: " .. tostring(buildError))
+	say("running headless; use _G.AOTR_DELTA.start()")
+end
+
+--============================================================================
+--  PUBLIC API
+--============================================================================
+Farm.state = S
+Farm.ui = UI.win
+Farm.vega = Vega
+Farm.start = startFarm
+Farm.stop = stopFarm
+Farm.toggle = function() return setFarm(not S.running) end
+Farm.restore = restoreNapes
+Farm.retry = function(force) return pressRetry(force) end
+Farm.panic = panic
+Farm.selftest = selftest
+Farm.status = function() return table.concat(statusLines(), " | ") end
+Farm.stats = Stats.data
+Farm.rejoin = rejoinNow
+Farm.dumpUI = GuiAuto.dump
+Farm.installAutoExec = installAutoExec
+Farm.gui = GuiAuto
+Farm.visuals = Visual
+Farm.move = Move
+Farm.notes = "Delta-native AOTR farm. No Matcha, no Drawing."
+
+genv.AOTR_DELTA = Farm
+-- getgenv() is the reliable home; _G is mirrored only when it is writable
+if type(_G) == "table" and _G ~= genv then
+	pcall(function() _G.AOTR_DELTA = Farm end)
+end
+
+if UI.win then
+	if game.PlaceId ~= PLACE then
+		UI.win:Notify({
+			Title = "Different place",
+			Content = "This farm targets " .. PLACE .. "; loaded in " .. tostring(game.PlaceId) .. ". The menu works, but titan paths will not match.",
+			Type = "warning",
+			Duration = 10,
+		})
+	end
+	refreshStatus()
+end
+
+say("ready - F5 farm, F6 napes, F7 panic. _G.AOTR_DELTA for the API.")
+return Farm
