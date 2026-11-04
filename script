@@ -1,4 +1,2403 @@
 --============================================================================
+--  AOTR DELTA FARM 3.0  -  SINGLE-FILE BUILD
+--============================================================================
+--  Generated from vega_ui.lua + aotr_delta_farm.lua. Edit those two and
+--  regenerate; this file is the paste-into-Delta build. It carries the Vega
+--  UI library inline, so it needs no readfile, no second file and no
+--  loadstring. `return Farm` at the bottom is the same API object the
+--  two-file build publishes on getgenv().AOTR_DELTA.
+--
+--  Place 14638336319 (AOTR). No Matcha APIs, no Drawing, no assets.
+--============================================================================
+
+local Vega = (function()
+--============================================================================
+--  VEGA UI 1.0.0  -  single-file Roblox interface library for Delta
+--============================================================================
+--  Delta runs ordinary Roblox Luau, so this library draws with real Instances
+--  (no Drawing, no Matcha readtbl/applygc, no downloaded assets).
+--
+--  QUICK START
+--    local Vega = loadstring(readfile("vega_ui.lua"))()
+--    local Win  = Vega:CreateWindow({ Title = "My Script", Subtitle = "v1" })
+--    local Tab  = Win:AddTab({ Title = "Main" })
+--    Tab:AddButton({ Title = "Click me", Callback = function() print("hi") end })
+--    Tab:AddToggle({ Title = "Enabled", Flag = "enabled", Default = true,
+--        Callback = function(v) print(v) end })
+--
+--  The positional shorthand from the brief also works:
+--    local Win = Vega:CreateWindow("Title", "Description")
+--    local Tab = Win:AddTab("Home")
+--    Tab:AddButton("Click Me", function() print("Clicked") end)
+--    Tab:AddToggle("Enable Feature", false, function(v) print(v) end)
+--
+--  EVERY COMPONENT, ONE SECTION
+--    local S = Tab:AddSection({ Title = "Inputs" })
+--
+--    S:AddButton({ Title = "Apply", Callback = function(comp) print(comp.Title) end })
+--    S:AddToggle({ Title = "Enabled", Flag = "enabled", Default = true,
+--        Callback = function(value) print("toggle", value) end })
+--    S:AddSlider({ Title = "Distance", Min = 10, Max = 200, Default = 80, Step = 5,
+--        Suffix = " st", Flag = "distance", Callback = function(value) print(value) end })
+--    S:AddTextbox({ Title = "Name", Placeholder = "type here", Numeric = false,
+--        Flag = "name", Callback = function(text) print(text) end })
+--    S:AddDropdown({ Title = "Mode", Options = { "A", "B", "C" }, Default = "A",
+--        Flag = "mode", Callback = function(value) print(value) end })
+--    S:AddDropdown({ Title = "Tags", Multi = true, Options = { "x", "y", "z" },
+--        Flag = "tags", Callback = function(list) print(table.concat(list, ",")) end })
+--    S:AddColorPicker({ Title = "Accent", Default = Color3.fromRGB(124, 92, 255),
+--        Flag = "accent", Callback = function(color) print(color) end })
+--    S:AddKeybind({ Title = "Hotkey", Default = Enum.KeyCode.F5, Mode = "Toggle",
+--        Callback = function(pressed) print("pressed", pressed) end })
+--    S:AddLabel({ Title = "Plain label" })
+--    S:AddParagraph({ Title = "Long wrapped text...", RichText = true })
+--    S:AddDivider()
+--
+--    Vega:Notify({ Title = "Saved", Content = "Config written.", Type = "success" })
+--    Vega:Dialog({ Title = "Confirm", Content = "Delete it?", Buttons = {
+--        { Text = "Cancel" }, { Text = "Delete", Primary = true, Callback = fn } } })
+--    Win:SetTheme("Carbon")            -- Midnight / Carbon / Daylight / Ocean / Sakura
+--    Win:SetTheme({ Accent = Color3.fromRGB(0, 255, 180) })  -- custom: one-off
+--                                       -- fields override Midnight
+--    Win:SaveConfig("default")        -- Vega/default.json
+--    Win:LoadConfig("default")
+--    print(Vega.Version)              -- this file returns the Vega table
+--
+--  CUSTOM FEATURES
+--    * Vega:Capabilities() reports the executor surface as booleans, so a caller
+--      can hide a feature instead of pcall-ing into a missing global.
+--    * The header search box filters every tab at once and switches to the first
+--      tab that matches.
+--    * Every Flag is mirrored into Win.Flags and can be saved as JSON, listed,
+--      deleted, exported and imported, including EnumItems and Color3 values.
+--    * Vega.Rich gives safe tag builders for labels / paragraphs.
+--    * Multi-window support: each window has its own ScreenGui, DisplayOrder is
+--      bumped on click, and Vega:SetTheme applies a theme to all of them.
+--    * Touch support: every control uses InputBegan / Activated (not
+--      MouseButton1Down), and the floating UI button appears automatically when
+--      UserInputService.TouchEnabled is true.
+--
+--  COMPONENTS (table form; every one accepts Title, Description, Flag)
+--    AddButton   { Callback, Confirm, Danger }
+--    AddToggle   { Default, Callback }
+--    AddSlider   { Min, Max, Default, Step, Decimals, Suffix, Callback, CallbackEnd }
+--    AddTextbox  { Placeholder, Default, Numeric, Live, Callback }
+--    AddDropdown { Options, Default, Multi, Searchable, Callback }
+--    AddColorPicker { Default, Callback }
+--    AddKeybind  { Default, Mode = "Toggle"|"Hold", Callback }
+--    AddLabel / AddParagraph { RichText } / AddDivider
+--    AddSection  { Title, Columns = 1|2 }   (grid sections hold compact rows)
+--
+--  FLAGS + CONFIG
+--    Any component with Flag=... mirrors its value into Win.Flags[flag].
+--    Win:GetFlag / SetFlag / OnFlagChanged, Win:SaveConfig("name"),
+--    Win:LoadConfig("name"), Win:ExportConfig(), Win:ImportConfig(json).
+--    Files live in the "Vega" folder next to the executor workspace.
+--
+--  RICH TEXT
+--    Vega.Rich.Bold / Italic / Underline / Color / Stroke / Badge return tagged
+--    strings. Use them with AddLabel or AddParagraph and RichText = true.
+--
+--  THEMES + WINDOW MANAGEMENT
+--    Win:SetTheme("Midnight") / Win:SetAccent(Color3) for one window;
+--    Vega:SetTheme(name) applies a preset to every open window at once.
+--    Win:Open / Hide / Toggle / ToggleCollapsed / SetCollapsed / IsCollapsed /
+--    SelectTab / Destroy, Win:GetBounds(), Win:SetPosition(x, y) /
+--    GetPosition(), Win:SetFabVisible(false) while a script is driving the
+--    mouse. Every window is draggable, resizable (bottom-right grip) and
+--    re-orders itself when clicked.
+--
+--  EXECUTOR SUPPORT
+--    gethui() is used when present, otherwise PlayerGui. Every optional global
+--    (firesignal, getconnections, hookfunction, isexecutorclosure, file API,
+--    clipboard, mouse/key input) is probed with pcall or type(), so a missing
+--    capability disables that one feature and never the interface.
+--    Vega:Capabilities() returns the detected surface as a table.
+--============================================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local HttpService = game:GetService("HttpService")
+local TextService = game:GetService("TextService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local FONT = Enum.Font.GothamMedium
+local FONT_BOLD = Enum.Font.GothamBold
+
+local Vega = {}
+Vega.Version = "1.0.0"
+Vega.ConfigFolder = "Vega"
+Vega.Windows = {}
+Vega.ThemeNames = { "Midnight", "Carbon", "Daylight", "Ocean", "Sakura" }
+Vega._toasts = {}
+Vega._order = 100
+
+--============================================================================
+--  THEMES
+--============================================================================
+Vega.Themes = {
+	Midnight = {
+		Background = Color3.fromRGB(16, 18, 24), Surface = Color3.fromRGB(22, 25, 33),
+		SurfaceAlt = Color3.fromRGB(29, 33, 43), SurfaceHover = Color3.fromRGB(36, 41, 53),
+		Stroke = Color3.fromRGB(45, 51, 66), Text = Color3.fromRGB(237, 241, 247),
+		SubText = Color3.fromRGB(152, 162, 180), Accent = Color3.fromRGB(124, 92, 255),
+		AccentText = Color3.fromRGB(255, 255, 255), Good = Color3.fromRGB(74, 222, 128),
+		Warn = Color3.fromRGB(251, 191, 36), Bad = Color3.fromRGB(248, 113, 113),
+	},
+	Carbon = {
+		Background = Color3.fromRGB(11, 11, 13), Surface = Color3.fromRGB(18, 18, 21),
+		SurfaceAlt = Color3.fromRGB(25, 25, 29), SurfaceHover = Color3.fromRGB(34, 34, 39),
+		Stroke = Color3.fromRGB(46, 46, 53), Text = Color3.fromRGB(240, 240, 243),
+		SubText = Color3.fromRGB(150, 150, 158), Accent = Color3.fromRGB(255, 122, 26),
+		AccentText = Color3.fromRGB(20, 12, 5), Good = Color3.fromRGB(74, 222, 128),
+		Warn = Color3.fromRGB(251, 191, 36), Bad = Color3.fromRGB(248, 113, 113),
+	},
+	Daylight = {
+		Background = Color3.fromRGB(244, 246, 251), Surface = Color3.fromRGB(255, 255, 255),
+		SurfaceAlt = Color3.fromRGB(238, 241, 248), SurfaceHover = Color3.fromRGB(229, 234, 243),
+		Stroke = Color3.fromRGB(209, 216, 228), Text = Color3.fromRGB(26, 32, 44),
+		SubText = Color3.fromRGB(100, 110, 128), Accent = Color3.fromRGB(37, 99, 235),
+		AccentText = Color3.fromRGB(255, 255, 255), Good = Color3.fromRGB(22, 163, 74),
+		Warn = Color3.fromRGB(217, 119, 6), Bad = Color3.fromRGB(220, 38, 38),
+	},
+	Ocean = {
+		Background = Color3.fromRGB(8, 20, 32), Surface = Color3.fromRGB(12, 29, 45),
+		SurfaceAlt = Color3.fromRGB(17, 39, 59), SurfaceHover = Color3.fromRGB(23, 50, 74),
+		Stroke = Color3.fromRGB(30, 64, 92), Text = Color3.fromRGB(226, 240, 250),
+		SubText = Color3.fromRGB(135, 170, 195), Accent = Color3.fromRGB(34, 211, 238),
+		AccentText = Color3.fromRGB(5, 20, 30), Good = Color3.fromRGB(52, 211, 153),
+		Warn = Color3.fromRGB(251, 191, 36), Bad = Color3.fromRGB(248, 113, 113),
+	},
+	Sakura = {
+		Background = Color3.fromRGB(24, 16, 23), Surface = Color3.fromRGB(33, 22, 32),
+		SurfaceAlt = Color3.fromRGB(43, 29, 42), SurfaceHover = Color3.fromRGB(54, 37, 52),
+		Stroke = Color3.fromRGB(66, 46, 63), Text = Color3.fromRGB(250, 240, 247),
+		SubText = Color3.fromRGB(190, 160, 180), Accent = Color3.fromRGB(244, 114, 182),
+		AccentText = Color3.fromRGB(40, 15, 28), Good = Color3.fromRGB(74, 222, 128),
+		Warn = Color3.fromRGB(251, 191, 36), Bad = Color3.fromRGB(248, 113, 113),
+	},
+}
+Vega.ActiveTheme = Vega.Themes.Midnight
+
+--============================================================================
+--  SMALL HELPERS
+--============================================================================
+local function viewportSize()
+	local cam = workspace.CurrentCamera
+	if cam then return cam.ViewportSize end
+	return Vector2.new(1280, 720)
+end
+
+local function make(class, props, parent)
+	local obj = Instance.new(class)
+	if props then
+		for k, v in pairs(props) do
+			if k ~= "Parent" then obj[k] = v end
+		end
+	end
+	if parent then obj.Parent = parent end
+	return obj
+end
+
+local function corner(obj, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 6)
+	c.Parent = obj
+	return c
+end
+
+local function tween(obj, time, props, style, direction)
+	local info = TweenInfo.new(time or 0.15, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out)
+	local anim = TweenService:Create(obj, info, props)
+	anim:Play()
+	return anim
+end
+
+local function pad(obj, top, right, bottom, left)
+	local p = Instance.new("UIPadding")
+	p.PaddingTop = UDim.new(0, top or 0)
+	p.PaddingRight = UDim.new(0, right or 0)
+	p.PaddingBottom = UDim.new(0, bottom or 0)
+	p.PaddingLeft = UDim.new(0, left or 0)
+	p.Parent = obj
+	return p
+end
+
+local function textLabel(parent, props)
+	local base = {
+		BackgroundTransparency = 1, BorderSizePixel = 0, Font = FONT,
+		TextSize = 13, Text = "", TextColor3 = Color3.fromRGB(235, 238, 244),
+		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center,
+	}
+	for k, v in pairs(props or {}) do base[k] = v end
+	return make("TextLabel", base, parent)
+end
+
+local function textButton(parent, props, text)
+	local base = {
+		BackgroundColor3 = Color3.fromRGB(30, 34, 44), BorderSizePixel = 0, Font = FONT,
+		TextSize = 13, Text = text or "", TextColor3 = Color3.fromRGB(235, 238, 244),
+		AutoButtonColor = false, TextXAlignment = Enum.TextXAlignment.Center,
+	}
+	for k, v in pairs(props or {}) do base[k] = v end
+	return make("TextButton", base, parent)
+end
+
+local function parentGui(gui)
+	-- gethui() is the right home for executor UIs, but on some Delta builds it
+	-- returns a container that refuses children. Collect every candidate and use
+	-- the first one that actually accepts the ScreenGui.
+	local targets = {}
+	if type(gethui) == "function" then
+		local ok, hui = pcall(gethui)
+		if ok and hui then targets[#targets + 1] = hui end
+	end
+	local pg = LocalPlayer:FindFirstChild("PlayerGui")
+	if not pg then
+		local ok, waited = pcall(function() return LocalPlayer:WaitForChild("PlayerGui", 10) end)
+		if ok then pg = waited end
+	end
+	if pg then targets[#targets + 1] = pg end
+	for _, target in ipairs(targets) do
+		if pcall(function() gui.Parent = target end) then return true end
+	end
+	return false
+end
+
+local function resolveTheme(theme)
+	local out = {}
+	local base = Vega.Themes.Midnight
+	for k, v in pairs(base) do out[k] = v end
+	if type(theme) == "string" then
+		local preset = Vega.Themes[theme] or base
+		for k, v in pairs(preset) do out[k] = v end
+	elseif type(theme) == "table" then
+		for k, v in pairs(theme) do out[k] = v end
+	end
+	return out
+end
+
+local function normalizeKey(key)
+	if key == nil then return nil end
+	if typeof(key) == "EnumItem" then
+		if key.EnumType == Enum.KeyCode then return key end
+		return nil
+	end
+	if type(key) == "string" then
+		local ok, enum = pcall(function() return Enum.KeyCode[key] end)
+		if ok then return enum end
+	end
+	return nil
+end
+
+local function encodeValue(value)
+	if typeof(value) == "Color3" then return { __t = "color", hex = value:ToHex() } end
+	if typeof(value) == "EnumItem" then return { __t = "enum", enum = tostring(value.EnumType), name = value.Name } end
+	if type(value) == "table" then
+		local out = {}
+		for i, item in ipairs(value) do out[i] = encodeValue(item) end
+		return out
+	end
+	return value
+end
+
+local function decodeValue(value)
+	if type(value) == "table" and value.__t == "color" then
+		local ok, c = pcall(Color3.fromHex, value.hex)
+		return ok and c or Color3.new(1, 1, 1)
+	end
+	if type(value) == "table" and value.__t == "enum" then
+		local enumName = tostring(value.enum or ""):gsub("^Enum%.", "")
+		local ok, enumType = pcall(function() return Enum[enumName] end)
+		if ok and enumType then return enumType[value.name] end
+		return nil
+	end
+	if type(value) == "table" then
+		local out = {}
+		for i, item in ipairs(value) do out[i] = decodeValue(item) end
+		return out
+	end
+	return value
+end
+
+local function copyText(text)
+	local fn = nil
+	if type(setclipboard) == "function" then fn = setclipboard
+	elseif type(toclipboard) == "function" then fn = toclipboard end
+	if not fn then return false end
+	return pcall(fn, tostring(text))
+end
+
+--============================================================================
+--  CAPABILITIES
+--============================================================================
+-- Vega:SetTheme("Midnight"|"Carbon"|"Daylight"|"Ocean"|"Sakura"|table)
+-- Applies to every open window and to notifications / dialogs.
+function Vega:SetTheme(theme)
+	for _, win in ipairs(self.Windows) do win:SetTheme(theme) end
+	self.ActiveTheme = resolveTheme(theme)
+	return self.ActiveTheme
+end
+
+function Vega:Capabilities()
+	local caps = {}
+	caps.gethui = type(gethui) == "function"
+	caps.getconnections = type(getconnections) == "function"
+	caps.firesignal = type(firesignal) == "function"
+	caps.hookfunction = type(hookfunction) == "function"
+	caps.isexecutorclosure = type(isexecutorclosure) == "function"
+	caps.mouse1click = type(mouse1click) == "function"
+	caps.keypress = type(keypress) == "function"
+	caps.keyrelease = type(keyrelease) == "function"
+	caps.fireproximityprompt = type(fireproximityprompt) == "function"
+	caps.fireclickdetector = type(fireclickdetector) == "function"
+	caps.setclipboard = type(setclipboard) == "function" or type(toclipboard) == "function"
+	caps.writefile = type(writefile) == "function"
+	caps.readfile = type(readfile) == "function"
+	caps.loadstring = type(loadstring) == "function"
+	caps.setfpscap = type(setfpscap) == "function"
+	return caps
+end
+
+Vega.Copy = copyText
+
+--============================================================================
+--  RICH TEXT HELPERS
+--============================================================================
+--  Roblox rich text only needs the tags, but hand-writing them is noisy, so
+--  these return the tagged string. Use them with AddLabel / AddParagraph and
+--  RichText = true:
+--    Tab:AddParagraph({ RichText = true, Title = Vega.Rich.Bold("Farm") .. " ready" })
+Vega.Rich = {}
+
+local function richEscape(text)
+	return tostring(text or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+end
+
+-- Vega.Rich.Color(text, Color3) -> '<font color="#rrggbb">text</font>'
+function Vega.Rich.Color(text, color)
+	local hex = typeof(color) == "Color3" and color:ToHex() or tostring(color or "ffffff")
+	return string.format('<font color="#%s">%s</font>', hex, richEscape(text))
+end
+
+function Vega.Rich.Bold(text)
+	return "<b>" .. richEscape(text) .. "</b>"
+end
+
+function Vega.Rich.Italic(text)
+	return "<i>" .. richEscape(text) .. "</i>"
+end
+
+function Vega.Rich.Underline(text)
+	return "<u>" .. richEscape(text) .. "</u>"
+end
+
+-- Vega.Rich.Stroke(text, Color3) -> outlined text, useful over bright maps
+function Vega.Rich.Stroke(text, color)
+	local hex = typeof(color) == "Color3" and color:ToHex() or tostring(color or "000000")
+	return string.format('<stroke color="#%s" thickness="1">%s</stroke>', hex, richEscape(text))
+end
+
+-- Vega.Rich.Badge(text, Color3) -> coloured, bold label with brackets
+function Vega.Rich.Badge(text, color)
+	return Vega.Rich.Color("[" .. tostring(text) .. "]", color)
+end
+
+--============================================================================
+--  OVERLAY: notifications, dialogs, tooltips
+--============================================================================
+function Vega:_overlay()
+	if self._overlayGui and self._overlayGui.Parent then return self._overlayGui end
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "VegaOverlay"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = false
+	gui.DisplayOrder = 5000
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	if not parentGui(gui) then gui:Destroy() return nil end
+	self._overlayGui = gui
+	return gui
+end
+
+function Vega:_theme()
+	return self.ActiveTheme or self.Themes.Midnight
+end
+
+-- Vega:Notify({ Title, Content, Type = "info"|"success"|"warning"|"error", Duration })
+function Vega:Notify(cfg)
+	if type(cfg) == "string" then cfg = { Title = cfg } end
+	cfg = cfg or {}
+	local gui = self:_overlay()
+	if not gui then return nil end
+	local theme = self:_theme()
+	local vp = viewportSize()
+	local width = math.min(300, math.max(180, vp.X - 24))
+	local height = 64
+	local kind = string.lower(tostring(cfg.Type or "info"))
+	local color = theme.Accent
+	if kind == "success" then color = theme.Good
+	elseif kind == "warning" or kind == "warn" then color = theme.Warn
+	elseif kind == "error" then color = theme.Bad end
+
+	local toast = make("Frame", {
+		Size = UDim2.fromOffset(width, height), BackgroundColor3 = theme.Surface,
+		BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 60,
+	}, gui)
+	corner(toast, 8)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = theme.Stroke
+	stroke.Thickness = 1
+	stroke.Parent = toast
+	make("Frame", { Size = UDim2.new(0, 3, 1, 0), BackgroundColor3 = color, BorderSizePixel = 0, ZIndex = 61 }, toast)
+	textLabel(toast, {
+		Position = UDim2.fromOffset(12, 8), Size = UDim2.new(1, -42, 0, 16),
+		Text = tostring(cfg.Title or "Notice"), Font = FONT_BOLD, TextSize = 13,
+		TextColor3 = theme.Text, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 62,
+	})
+	textLabel(toast, {
+		Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -42, 0, 28),
+		Text = tostring(cfg.Content or ""), TextSize = 12, TextColor3 = theme.SubText,
+		TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top,
+		TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 62,
+	})
+	local closeBtn = textButton(toast, {
+		Position = UDim2.new(1, -30, 0, 6), Size = UDim2.fromOffset(24, 22),
+		BackgroundTransparency = 1, Text = "x", TextSize = 12,
+		TextColor3 = theme.SubText, ZIndex = 63,
+	}, "x")
+	local bar = make("Frame", {
+		AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 3, 1, 0),
+		Size = UDim2.new(1, -3, 0, 2), BackgroundColor3 = color,
+		BorderSizePixel = 0, ZIndex = 62,
+	}, toast)
+
+	table.insert(self._toasts, toast)
+	toast._width = width
+	local duration = tonumber(cfg.Duration) or 5
+	local closed = false
+
+	local function reflow()
+		local y = 12
+		local vpNow = viewportSize()
+		for _, item in ipairs(self._toasts) do
+			if item.Parent then
+				local w = item._width or width
+				tween(item, 0.16, { Position = UDim2.fromOffset(vpNow.X - w - 12, y) })
+				y = y + (item.AbsoluteSize.Y > 0 and item.AbsoluteSize.Y or height) + 8
+			end
+		end
+	end
+
+	local function close()
+		if closed then return end
+		closed = true
+		for i = #self._toasts, 1, -1 do
+			if self._toasts[i] == toast then table.remove(self._toasts, i) end
+		end
+		local w = toast._width or width
+		tween(toast, 0.16, {
+			Position = UDim2.fromOffset(toast.Position.X.Offset + w + 24, toast.Position.Y.Offset),
+			BackgroundTransparency = 1,
+		})
+		task.delay(0.18, function()
+			if toast and toast.Parent then toast:Destroy() end
+			reflow()
+		end)
+	end
+	toast._close = close
+
+	closeBtn.Activated:Connect(close)
+	toast.Position = UDim2.fromOffset(vp.X + 8, 12 + (#self._toasts - 1) * (height + 8))
+	task.defer(reflow)
+	tween(bar, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear)
+	task.delay(duration, close)
+	if #self._toasts > 4 then
+		local oldest = self._toasts[1]
+		if oldest and oldest ~= toast and oldest._close then oldest._close() end
+	end
+	return toast
+end
+
+-- Vega:Dialog({ Title, Content, Buttons = { { Text, Callback, Primary, Danger } } })
+function Vega:Dialog(cfg)
+	cfg = cfg or {}
+	local gui = self:_overlay()
+	if not gui then return nil end
+	local theme = self:_theme()
+	local vp = viewportSize()
+	local width = math.min(360, math.max(220, vp.X - 32))
+	local content = tostring(cfg.Content or "")
+	local contentSize = TextService:GetTextSize(content, 13, FONT, Vector2.new(width - 36, 10000))
+	local height = 26 + 22 + math.max(20, contentSize.Y) + 54
+	local dim = make("Frame", {
+		Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.45, ZIndex = 200, Active = true,
+	}, gui)
+	local card = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(width, height), BackgroundColor3 = theme.Surface,
+		BorderSizePixel = 0, ClipsDescendants = true, ZIndex = 201,
+	}, dim)
+	corner(card, 10)
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = theme.Stroke
+	stroke.Thickness = 1
+	stroke.Parent = card
+	textLabel(card, {
+		Position = UDim2.fromOffset(18, 16), Size = UDim2.new(1, -36, 0, 20),
+		Text = tostring(cfg.Title or "Confirm"), Font = FONT_BOLD, TextSize = 15,
+		TextColor3 = theme.Text, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 203,
+	})
+	textLabel(card, {
+		Position = UDim2.fromOffset(18, 42), Size = UDim2.new(1, -36, 0, math.max(20, contentSize.Y)),
+		Text = content, TextSize = 13, TextColor3 = theme.SubText, TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 203,
+	})
+
+	local closed = false
+	local function close()
+		if closed then return end
+		closed = true
+		dim:Destroy()
+	end
+
+	local buttons = cfg.Buttons or { { Text = "OK", Primary = true } }
+	local count = math.min(#buttons, 3)
+	for index = count, 1, -1 do
+		local spec = buttons[index]
+		local primary = spec.Primary == true
+		local btn = textButton(card, {
+			AnchorPoint = Vector2.new(1, 1),
+			Position = UDim2.new(1, -18 - (count - index) * 100, 1, -16),
+			Size = UDim2.fromOffset(92, 30),
+			BackgroundColor3 = primary and theme.Accent or theme.SurfaceAlt,
+			Text = tostring(spec.Text or "OK"), TextSize = 12,
+			TextColor3 = primary and theme.AccentText or theme.Text,
+			ZIndex = 204,
+		}, "")
+		corner(btn, 6)
+		btn.Activated:Connect(function()
+			close()
+			if spec.Callback then pcall(spec.Callback) end
+		end)
+	end
+
+	if cfg.Dismissable ~= false then
+		dim.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				local p = input.Position
+				local a = card.AbsolutePosition
+				local s = card.AbsoluteSize
+				if p.X < a.X or p.X > a.X + s.X or p.Y < a.Y or p.Y > a.Y + s.Y then close() end
+			end
+		end)
+	end
+	return { Frame = card, Close = close }
+end
+
+function Vega:_tooltip(comp)
+	if not UserInputService.MouseEnabled then return end
+	local gui = self:_overlay()
+	if not gui then return end
+	if not comp then
+		if self._tooltipFrame then self._tooltipFrame.Visible = false end
+		return
+	end
+	local theme = self:_theme()
+	local text = tostring(comp.Description or "")
+	if text == "" then return end
+	local frame = self._tooltipFrame
+	if not frame or not frame.Parent then
+		frame = make("Frame", {
+			BackgroundColor3 = theme.Surface, BorderSizePixel = 0,
+			ZIndex = 300, Visible = false, ClipsDescendants = true,
+		}, gui)
+		corner(frame, 5)
+		local s = Instance.new("UIStroke")
+		s.Color = theme.Stroke
+		s.Thickness = 1
+		s.Parent = frame
+		self._tooltipFrame = frame
+		frame._label = textLabel(frame, {
+			Position = UDim2.fromOffset(8, 4), Size = UDim2.new(1, -16, 0, 0),
+			TextSize = 12, TextColor3 = theme.Text, TextWrapped = true,
+			TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 301,
+		})
+	end
+	frame._label.Text = text
+	frame._label.TextColor3 = theme.Text
+	local vp = viewportSize()
+	local width = math.min(260, math.max(140, #text * 6.4 + 20))
+	frame.Size = UDim2.fromOffset(width, 18 + math.ceil(#text / math.max(1, math.floor(width / 6.2))) * 15)
+	local mouse = UserInputService:GetMouseLocation()
+	local insetY = 0
+	pcall(function() insetY = GuiService:GetGuiInset().Y end)
+	frame.Position = UDim2.fromOffset(
+		math.min(mouse.X + 14, vp.X - width - 8),
+		math.min(mouse.Y - insetY + 18, vp.Y - 40)
+	)
+	frame.Visible = true
+end
+
+--============================================================================
+--  FORWARD DECLARATIONS
+--============================================================================
+local Window, Tab, Section, Component
+local register
+
+--============================================================================
+--  WINDOW
+--============================================================================
+Window = {}
+Window.__index = Window
+
+function Vega:CreateWindow(a, b)
+	local cfg
+	if type(a) == "table" then cfg = a
+	else cfg = { Title = a, Subtitle = b } end
+	cfg = cfg or {}
+	local win = setmetatable({
+		Vega = self,
+		Title = cfg.Title or "Vega",
+		Subtitle = cfg.Subtitle or "",
+		_theme = resolveTheme(cfg.Theme),
+		_themeName = type(cfg.Theme) == "string" and cfg.Theme or "Midnight",
+		_colorRefs = {}, _themeFns = {}, _connections = {},
+		_tabs = {}, _flags = {}, _flagListeners = {}, _binds = {},
+		_components = {}, _panelClosers = {},
+		Flags = {},
+		_size = Vector2.new(cfg.Width or 600, cfg.Height or 430),
+		_toggleKey = normalizeKey(cfg.ToggleKey or Enum.KeyCode.RightShift),
+		_showFab = cfg.ToggleButton ~= false and (UserInputService.TouchEnabled or cfg.ToggleButton == true),
+		_destroyed = false, _collapsed = false,
+	}, Window)
+	win:_build()
+	table.insert(self.Windows, win)
+	self.ActiveTheme = win._theme
+	return win
+end
+
+function Window:_connect(signal, fn)
+	local ok, conn = pcall(function() return signal:Connect(fn) end)
+	if ok and conn then self._connections[#self._connections + 1] = conn end
+	return conn
+end
+
+function Window:_color(inst, prop, role)
+	self._colorRefs[#self._colorRefs + 1] = { inst = inst, prop = prop, role = role }
+	inst[prop] = self._theme[role] or self._theme.Text
+	return inst
+end
+
+function Window:_stroke(inst, thickness)
+	local s = Instance.new("UIStroke")
+	s.Thickness = thickness or 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.LineJoinMode = Enum.LineJoinMode.Round
+	s.Parent = inst
+	self:_color(s, "Color", "Stroke")
+	return s
+end
+
+function Window:_themeFn(fn)
+	self._themeFns[#self._themeFns + 1] = fn
+	pcall(fn, self._theme)
+	return fn
+end
+
+function Window:_applyTheme()
+	for _, ref in ipairs(self._colorRefs) do
+		local c = self._theme[ref.role]
+		if c then ref.inst[ref.prop] = c end
+	end
+	for _, fn in ipairs(self._themeFns) do pcall(fn, self._theme) end
+end
+
+function Window:_build()
+	local vp = viewportSize()
+	local w = math.min(self._size.X, math.max(300, vp.X - 20))
+	local h = math.min(self._size.Y, math.max(240, vp.Y - 60))
+	self._size = Vector2.new(math.floor(w), math.floor(h))
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "VegaUI"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	self.Vega._order = self.Vega._order + 1
+	gui.DisplayOrder = self.Vega._order
+	if not parentGui(gui) then
+		gui:Destroy()
+		error("Vega: could not parent ScreenGui (no gethui / PlayerGui)")
+	end
+	self._gui = gui
+
+	local root = make("Frame", {
+		Name = "VegaRoot", BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(self._size.X, self._size.Y),
+		Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+		Active = true, ZIndex = 10,
+	}, gui)
+	self._root = root
+
+	local shadow = make("Frame", {
+		BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.55,
+		Size = UDim2.new(1, 10, 1, 10), Position = UDim2.fromOffset(-5, 3), ZIndex = 1,
+	}, root)
+	corner(shadow, 14)
+	self._shadow = shadow
+
+	local body = make("Frame", {
+		BackgroundColor3 = self._theme.Background, BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 2,
+	}, root)
+	corner(body, 10)
+	self:_stroke(body)
+	self:_color(body, "BackgroundColor3", "Background")
+	self._body = body
+
+	local header = make("Frame", {
+		BackgroundColor3 = self._theme.Surface, BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 46), ZIndex = 3,
+	}, body)
+	self:_color(header, "BackgroundColor3", "Surface")
+	self._header = header
+
+	local drag = make("Frame", {
+		Size = UDim2.new(1, -266, 0, 46), BackgroundTransparency = 1,
+		Active = true, ZIndex = 4,
+	}, header)
+	self._dragArea = drag
+	self:_color(textLabel(drag, {
+		Position = UDim2.fromOffset(14, 6), Size = UDim2.new(1, -28, 0, 18),
+		Text = tostring(self.Title), Font = FONT_BOLD, TextSize = 15,
+		TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5,
+	}), "TextColor3", "Text")
+	self:_color(textLabel(drag, {
+		Position = UDim2.fromOffset(14, 24), Size = UDim2.new(1, -28, 0, 16),
+		Text = tostring(self.Subtitle), TextSize = 11,
+		TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5,
+	}), "TextColor3", "SubText")
+
+	local controls = make("Frame", {
+		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 0),
+		Size = UDim2.fromOffset(80, 46), BackgroundTransparency = 1, ZIndex = 5,
+	}, header)
+	local minimize = textButton(controls, {
+		Position = UDim2.fromOffset(0, 8), Size = UDim2.fromOffset(30, 30),
+		BackgroundTransparency = 1, Text = "-", TextSize = 16, ZIndex = 6,
+	}, "")
+	self:_color(minimize, "TextColor3", "SubText")
+	local hide = textButton(controls, {
+		Position = UDim2.fromOffset(40, 8), Size = UDim2.fromOffset(30, 30),
+		BackgroundTransparency = 1, Text = "x", TextSize = 13, ZIndex = 6,
+	}, "")
+	self:_color(hide, "TextColor3", "SubText")
+	minimize.Activated:Connect(function() self:ToggleCollapsed() end)
+	hide.Activated:Connect(function() self:Hide() end)
+	self._minimize = minimize
+
+	local search = make("Frame", {
+		AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -266, 0, 11),
+		Size = UDim2.fromOffset(170, 24), BackgroundColor3 = self._theme.SurfaceAlt,
+		BorderSizePixel = 0, ZIndex = 5,
+	}, header)
+	corner(search, 6)
+	self:_color(search, "BackgroundColor3", "SurfaceAlt")
+	self:_stroke(search)
+	self._search = search
+	local searchBox = make("TextBox", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -16, 1, 0),
+		Position = UDim2.fromOffset(8, 0), Font = FONT, TextSize = 12, Text = "",
+		PlaceholderText = "Search settings", PlaceholderColor3 = self._theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, ZIndex = 6,
+	}, search)
+	self:_color(searchBox, "TextColor3", "Text")
+	self:_color(searchBox, "PlaceholderColor3", "SubText")
+	self._searchBox = searchBox
+	self:_connect(searchBox:GetPropertyChangedSignal("Text"), function()
+		self:_applyFilter(searchBox.Text)
+	end)
+
+	local sidebar = make("Frame", {
+		Position = UDim2.fromOffset(0, 46), Size = UDim2.new(0, 120, 1, -46),
+		BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 3,
+	}, body)
+	self._sidebar = sidebar
+	local separator = make("Frame", {
+		Position = UDim2.fromOffset(120, 46), Size = UDim2.new(0, 1, 1, -46),
+		BackgroundColor3 = self._theme.Stroke, BorderSizePixel = 0, ZIndex = 3,
+	}, body)
+	self:_color(separator, "BackgroundColor3", "Stroke")
+	self._separator = separator
+	local tabList = make("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, 0),
+		CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 0, ScrollingDirection = Enum.ScrollingDirection.Y, ZIndex = 4,
+	}, sidebar)
+	pad(tabList, 8, 8, 8, 8)
+	make("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, tabList)
+	self._tabList = tabList
+
+	local content = make("Frame", {
+		Position = UDim2.fromOffset(120, 46), Size = UDim2.new(1, -120, 1, -46),
+		BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 3,
+	}, body)
+	self._content = content
+
+	local grip = make("Frame", {
+		AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 0, 1, 0),
+		Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1,
+		Active = true, ZIndex = 30,
+	}, body)
+	self._grip = grip
+	for i = 1, 3 do
+		self:_color(make("Frame", {
+			Size = UDim2.fromOffset(4 + i * 3, 1),
+			Position = UDim2.fromOffset(18 - (4 + i * 3), 18 - i * 4),
+			BackgroundColor3 = self._theme.Stroke, BorderSizePixel = 0, ZIndex = 31,
+		}, grip), "BackgroundColor3", "Stroke")
+	end
+
+	local dragging, dragStart, startPos = false, nil, nil
+	drag.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, dragStart, startPos = true, input.Position, root.AbsolutePosition
+			self:_closePanels()
+			self:_raise()
+		end
+	end)
+	self:_connect(UserInputService.InputChanged, function(input)
+		if not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			local delta = input.Position - dragStart
+			local now = viewportSize()
+			root.Position = UDim2.fromOffset(
+				math.clamp(startPos.X + delta.X, 80 - self._size.X, now.X - 80),
+				math.clamp(startPos.Y + delta.Y, 0, now.Y - 46)
+			)
+		end
+	end)
+	self:_connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+
+	local resizing, sizeStart, resizeOrigin = false, nil, nil
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			resizing, sizeStart, resizeOrigin = true, self._size, input.Position
+		end
+	end)
+	self:_connect(UserInputService.InputChanged, function(input)
+		if not resizing then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			local delta = input.Position - resizeOrigin
+			local now = viewportSize()
+			local nw = math.clamp(sizeStart.X + delta.X, math.min(330, now.X - 16), now.X - 16)
+			local nh = math.clamp(sizeStart.Y + delta.Y, math.min(260, now.Y - 56), now.Y - 56)
+			self._size = Vector2.new(nw, nh)
+			self:_layout()
+		end
+	end)
+	self:_connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			resizing = false
+		end
+	end)
+
+	self:_connect(UserInputService.InputBegan, function(input)
+		-- only a click inside this window may re-order it; raising on every
+		-- click made the last-created window cover the others permanently
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local p = input.Position
+			local a, s = self._root.AbsolutePosition, self._root.AbsoluteSize
+			if p.X >= a.X and p.X <= a.X + s.X and p.Y >= a.Y and p.Y <= a.Y + s.Y then
+				self:_raise()
+			end
+		end
+		self:_onInputBegan(input)
+	end)
+	self:_connect(UserInputService.InputEnded, function(input) self:_onInputEnded(input) end)
+
+	local cam = workspace.CurrentCamera
+	if cam then self:_connect(cam:GetPropertyChangedSignal("ViewportSize"), function() self:_onViewport() end) end
+
+	if self._showFab then self:_buildFab() end
+	self:_layout()
+end
+
+function Window:_buildFab()
+	local vp = viewportSize()
+	local size = 48
+	local fab = make("TextButton", {
+		Name = "VegaToggle", Size = UDim2.fromOffset(size, size),
+		Position = UDim2.fromOffset(vp.X - size - 14, math.floor(vp.Y * 0.45)),
+		BackgroundColor3 = self._theme.Accent, Text = "UI", Font = FONT_BOLD,
+		TextSize = 13, TextColor3 = self._theme.AccentText,
+		AutoButtonColor = false, ZIndex = 800, ClipsDescendants = true,
+	}, self._gui)
+	corner(fab, 24)
+	self:_color(fab, "BackgroundColor3", "Accent")
+	self:_color(fab, "TextColor3", "AccentText")
+	local start, moved, startPos = nil, false, nil
+	fab.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			start, moved, startPos = input.Position, false, fab.AbsolutePosition
+		end
+	end)
+	self:_connect(UserInputService.InputChanged, function(input)
+		if not start then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			local delta = input.Position - start
+			if math.abs(delta.X) + math.abs(delta.Y) > 6 then moved = true end
+			if moved then
+				local now = viewportSize()
+				fab.Position = UDim2.fromOffset(
+					math.clamp(startPos.X + delta.X, 4, now.X - size - 4),
+					math.clamp(startPos.Y + delta.Y, 4, now.Y - size - 4)
+				)
+			end
+		end
+	end)
+	self:_connect(UserInputService.InputEnded, function(input)
+		if not start then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			local wasMoved = moved
+			start = nil
+			if not wasMoved then self:Toggle() end
+		end
+	end)
+	self._fab = fab
+end
+
+function Window:_layout()
+	local sw = math.clamp(math.floor(self._size.X * 0.23), 90, 126)
+	self._sidebar.Size = UDim2.new(0, sw, 1, -46)
+	self._separator.Position = UDim2.fromOffset(sw, 46)
+	self._separator.Size = UDim2.new(0, 1, 1, -46)
+	self._content.Position = UDim2.fromOffset(sw, 46)
+	self._content.Size = UDim2.new(1, -sw, 1, -46)
+	local showSearch = self._size.X >= 440 and not self._collapsed
+	self._search.Visible = showSearch
+	self._dragArea.Size = UDim2.new(1, showSearch and -266 or -92, 0, 46)
+	self._sidebar.Visible = not self._collapsed
+	self._separator.Visible = not self._collapsed
+	self._content.Visible = not self._collapsed
+	self._grip.Visible = not self._collapsed
+	self._root.Size = UDim2.fromOffset(self._size.X, self._collapsed and 46 or self._size.Y)
+	self._shadow.Size = UDim2.new(1, 10, 1, 10)
+end
+
+function Window:_onViewport()
+	local vp = viewportSize()
+	self._size = Vector2.new(
+		math.min(self._size.X, math.max(300, vp.X - 16)),
+		math.min(self._size.Y, math.max(240, vp.Y - 56))
+	)
+	self:_clampPosition()
+	self:_layout()
+end
+
+function Window:_clampPosition()
+	local p = self._root.Position
+	if p.X.Scale == 0.5 and p.Y.Scale == 0.5 then return end
+	local vp = viewportSize()
+	self._root.Position = UDim2.fromOffset(
+		math.clamp(p.X.Offset, 60 - self._size.X, vp.X - 60),
+		math.clamp(p.Y.Offset, 0, vp.Y - 42)
+	)
+end
+
+function Window:_raise()
+	self.Vega._order = self.Vega._order + 1
+	self._gui.DisplayOrder = self.Vega._order
+end
+
+function Window:_onInputBegan(input)
+	if self._destroyed then return end
+	if UserInputService:GetFocusedTextBox() then return end
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	if self._listeningBind then
+		local bind = self._listeningBind
+		if input.KeyCode == Enum.KeyCode.Escape then
+			self._listeningBind = nil
+			bind:_cancelListen()
+		elseif input.KeyCode == Enum.KeyCode.Backspace then
+			self._listeningBind = nil
+			bind:Set(nil)
+		else
+			self._listeningBind = nil
+			bind:Set(input.KeyCode)
+		end
+		return
+	end
+	if self._toggleKey and input.KeyCode == self._toggleKey then
+		self:Toggle()
+		return
+	end
+	for _, bind in ipairs(self._binds) do
+		if bind._enabled ~= false and bind._key ~= nil and bind._key == input.KeyCode then
+			bind:_fire(true)
+		end
+	end
+end
+
+function Window:_onInputEnded(input)
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	for _, bind in ipairs(self._binds) do
+		if bind.Mode == "Hold" and bind._key ~= nil and bind._key == input.KeyCode then
+			bind:_fire(false)
+		end
+	end
+end
+
+function Window:_applyFilter(query)
+	if self._filtering then return end
+	self._filtering = true
+	local q = string.lower(tostring(query or ""))
+	local counts = {}
+	local firstHit = nil
+	for _, tab in ipairs(self._tabs) do
+		local n = tab:_filter(q)
+		counts[tab] = n
+		if q ~= "" and n > 0 and firstHit == nil then firstHit = tab end
+	end
+	if q ~= "" and self._activeTab and (counts[self._activeTab] or 0) == 0 and firstHit then
+		self:_activate(firstHit)
+	end
+	for _, tab in ipairs(self._tabs) do
+		tab.Empty.Visible = (tab == self._activeTab) and q ~= "" and (counts[tab] or 0) == 0
+	end
+	self._filtering = false
+end
+
+function Window:_activate(tab)
+	for _, item in ipairs(self._tabs) do
+		item.Frame.Visible = item == tab
+		item:_markActive(item == tab)
+	end
+	self._activeTab = tab
+	self:_closePanels()
+end
+
+function Window:SelectTab(tab)
+	if not tab then return end
+	self:_activate(tab)
+	self:_applyFilter(self._searchBox and self._searchBox.Text or "")
+end
+
+function Window:AddTab(a, b)
+	local cfg = type(a) == "table" and a or { Title = a }
+	local index = #self._tabs + 1
+	local tab = setmetatable({
+		Window = self, Title = cfg.Title or ("Tab " .. index),
+		Components = {}, Sections = {}, Index = index,
+	}, Tab)
+	tab:_build()
+	self._tabs[index] = tab
+	if self._activeTab == nil or cfg.Select then self:SelectTab(tab) end
+	return tab
+end
+
+function Window:_registerPanel(closer)
+	-- dropdown / colour panels re-register on every open; keep one closer each
+	for _, existing in ipairs(self._panelClosers) do
+		if existing == closer then return end
+	end
+	self._panelClosers[#self._panelClosers + 1] = closer
+end
+
+function Window:_closePanels()
+	local list = self._panelClosers
+	self._panelClosers = {}
+	for _, closer in ipairs(list) do pcall(closer) end
+end
+
+function Window:_flag(comp, value)
+	if not comp.Flag then return end
+	self.Flags[comp.Flag] = value
+	local listeners = self._flagListeners[comp.Flag]
+	if listeners then
+		for i = #listeners, 1, -1 do
+			local ok, err = pcall(listeners[i], value, comp)
+			if not ok then warn("[Vega] flag listener: " .. tostring(err)) end
+		end
+	end
+end
+
+function Window:GetFlag(flag)
+	return self.Flags[flag]
+end
+
+function Window:SetFlag(flag, value)
+	local comp = self._flags[flag]
+	if comp and comp.Set then comp:Set(value) end
+	return comp ~= nil
+end
+
+function Window:OnFlagChanged(flag, fn)
+	if type(fn) ~= "function" then return function() end end
+	local list = self._flagListeners[flag]
+	if not list then list = {} self._flagListeners[flag] = list end
+	list[#list + 1] = fn
+	return function()
+		for i = #list, 1, -1 do if list[i] == fn then table.remove(list, i) end end
+	end
+end
+
+function Window:SetTheme(theme)
+	self._theme = resolveTheme(theme)
+	self._themeName = type(theme) == "string" and theme or "Custom"
+	self:_applyTheme()
+	self.Vega.ActiveTheme = self._theme
+	self:_closePanels()
+	return self._theme
+end
+
+function Window:SetAccent(color)
+	if typeof(color) ~= "Color3" then return end
+	self._theme.Accent = color
+	self:_applyTheme()
+	self.Vega.ActiveTheme = self._theme
+end
+
+function Window:Open()
+	self._root.Visible = true
+	self:_raise()
+end
+
+function Window:Hide()
+	self._root.Visible = false
+	self:_closePanels()
+end
+
+function Window:Toggle()
+	if self._root.Visible then self:Hide() else self:Open() end
+	return self._root.Visible
+end
+
+function Window:IsOpen()
+	return self._root.Visible
+end
+
+function Window:ToggleCollapsed()
+	self._collapsed = not self._collapsed
+	if self._minimize then self._minimize.Text = self._collapsed and "+" or "-" end
+	self:_layout()
+end
+
+function Window:SetCollapsed(value)
+	value = value == true
+	if self._collapsed ~= value then self:ToggleCollapsed() end
+end
+
+function Window:SetToggleKey(key)
+	self._toggleKey = normalizeKey(key)
+end
+
+function Window:SetPosition(x, y)
+	if type(x) ~= "number" or type(y) ~= "number" then
+		return false, "SetPosition needs two numbers"
+	end
+	self._root.Position = UDim2.fromOffset(math.floor(x), math.floor(y))
+	self:_clampPosition()
+	return true
+end
+
+function Window:GetPosition()
+	-- AbsolutePosition is what SetPosition reproduces, including a window that
+	-- was still centred with scale 0.5 when it was created.
+	local p = self._root.AbsolutePosition
+	if p then return p.X, p.Y end
+	local pos = self._root.Position
+	return pos.X.Offset, pos.Y.Offset
+end
+
+function Window:IsCollapsed()
+	return self._collapsed == true
+end
+
+function Window:GetBounds()
+	local pos, size = self._root.AbsolutePosition, self._root.AbsoluteSize
+	return pos.X, pos.Y, size.X, size.Y
+end
+
+-- The floating open/close button can be hidden while a script is driving the
+-- mouse, so a synthetic click cannot land on it.
+function Window:SetFabVisible(visible)
+	if self._fab then self._fab.Visible = visible ~= false end
+end
+
+-- Returns x, y, width, height of the floating button, or nil when it is absent
+-- or hidden. A script that synthesises clicks can use this to stay off it.
+function Window:GetFabBounds()
+	if not self._fab or not self._fab.Visible then return nil end
+	local pos, size = self._fab.AbsolutePosition, self._fab.AbsoluteSize
+	return pos.X, pos.Y, size.X, size.Y
+end
+
+function Window:Notify(cfg)
+	return self.Vega:Notify(cfg)
+end
+
+function Window:Dialog(cfg)
+	return self.Vega:Dialog(cfg)
+end
+
+function Window:Destroy()
+	if self._destroyed then return end
+	self._destroyed = true
+	self:_closePanels()
+	for _, conn in ipairs(self._connections) do pcall(function() conn:Disconnect() end) end
+	self._connections = {}
+	if self._gui then self._gui:Destroy() end
+	for i = #self.Vega.Windows, 1, -1 do
+		if self.Vega.Windows[i] == self then table.remove(self.Vega.Windows, i) end
+	end
+end
+
+--============================================================================
+--  CONFIG (flags -> JSON on disk)
+--============================================================================
+local function sanitizeName(name)
+	local clean = tostring(name or "default"):gsub("[^%w_%-%s]", "")
+	clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
+	if clean == "" then clean = "default" end
+	return clean
+end
+
+function Window:_configData()
+	local values = {}
+	for flag, comp in pairs(self._flags) do
+		local ok, value = pcall(comp.Get, comp)
+		if ok then values[flag] = encodeValue(value) end
+	end
+	return {
+		version = 1, theme = self._themeName,
+		accent = self._theme.Accent:ToHex(), values = values,
+	}
+end
+
+function Window:_configPath(name)
+	return self.Vega.ConfigFolder .. "/" .. sanitizeName(name) .. ".json"
+end
+
+function Window:SaveConfig(name)
+	if type(writefile) ~= "function" then return false, "executor has no writefile" end
+	if type(isfolder) == "function" and type(makefolder) == "function" then
+		local ok, exists = pcall(isfolder, self.Vega.ConfigFolder)
+		if not ok or not exists then pcall(makefolder, self.Vega.ConfigFolder) end
+	end
+	local ok, encoded = pcall(function() return HttpService:JSONEncode(self:_configData()) end)
+	if not ok then return false, "encode failed: " .. tostring(encoded) end
+	local path = self:_configPath(name)
+	local saved, err = pcall(writefile, path, encoded)
+	if not saved then return false, tostring(err) end
+	return true, path
+end
+
+function Window:LoadConfig(name)
+	if type(readfile) ~= "function" then return false, "executor has no readfile" end
+	local path = self:_configPath(name)
+	local ok, src = pcall(readfile, path)
+	if not ok or type(src) ~= "string" then return false, "config not found: " .. path end
+	local decoded, data = pcall(function() return HttpService:JSONDecode(src) end)
+	if not decoded or type(data) ~= "table" then return false, "invalid config JSON" end
+	if data.theme then self:SetTheme(data.theme) end
+	if data.accent then
+		local okColor, color = pcall(Color3.fromHex, data.accent)
+		if okColor then self:SetAccent(color) end
+	end
+	for flag, value in pairs(data.values or {}) do
+		local comp = self._flags[flag]
+		if comp and comp.Set then pcall(comp.Set, comp, decodeValue(value)) end
+	end
+	return true, path
+end
+
+function Window:DeleteConfig(name)
+	if type(delfile) ~= "function" then return false, "executor has no delfile" end
+	return pcall(delfile, self:_configPath(name))
+end
+
+function Window:ListConfigs()
+	if type(listfiles) ~= "function" then return {} end
+	local ok, files = pcall(listfiles, self.Vega.ConfigFolder)
+	if not ok or type(files) ~= "table" then return {} end
+	local names = {}
+	for _, file in ipairs(files) do
+		local name = tostring(file):match("([^/\\]+)%.json$")
+		if name then names[#names + 1] = name end
+	end
+	table.sort(names)
+	return names
+end
+
+function Window:ExportConfig()
+	return HttpService:JSONEncode(self:_configData())
+end
+
+function Window:ImportConfig(text)
+	local ok, data = pcall(function() return HttpService:JSONDecode(text) end)
+	if not ok or type(data) ~= "table" then return false end
+	if data.theme then self:SetTheme(data.theme) end
+	for flag, value in pairs(data.values or {}) do
+		local comp = self._flags[flag]
+		if comp and comp.Set then pcall(comp.Set, comp, decodeValue(value)) end
+	end
+	return true
+end
+
+--============================================================================
+--  TAB
+--============================================================================
+Tab = {}
+Tab.__index = Tab
+
+function Tab:_build()
+	local win = self.Window
+	local frame = make("ScrollingFrame", {
+		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+		CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollBarThickness = 3, ScrollBarImageColor3 = win._theme.Stroke,
+		ScrollingDirection = Enum.ScrollingDirection.Y, Visible = false, ZIndex = 2,
+	}, win._content)
+	pad(frame, 12, 12, 12, 12)
+	make("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, frame)
+	win:_color(frame, "ScrollBarImageColor3", "Stroke")
+	self.Frame = frame
+
+	local button = make("TextButton", {
+		Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = win._theme.SurfaceAlt,
+		BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 4,
+	}, win._tabList)
+	corner(button, 6)
+	self.Button = button
+	self.Indicator = make("Frame", {
+		Size = UDim2.fromOffset(3, 14), Position = UDim2.new(0, 4, 0.5, -7),
+		BackgroundColor3 = win._theme.Accent, BorderSizePixel = 0,
+		Visible = false, ZIndex = 6,
+	}, button)
+	corner(self.Indicator, 2)
+	self.Label = textLabel(button, {
+		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -18, 1, 0),
+		Text = self.Title, TextSize = 12, TextColor3 = win._theme.SubText,
+		TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5,
+	})
+	win:_color(self.Label, "TextColor3", "SubText")
+	win:_color(button, "BackgroundColor3", "SurfaceAlt")
+	win:_color(self.Indicator, "BackgroundColor3", "Accent")
+	button.Activated:Connect(function() win:SelectTab(self) end)
+	win:_themeFn(function(t)
+		if self._active then
+			self.Label.TextColor3 = t.Text
+			self.Button.BackgroundColor3 = t.SurfaceAlt
+		else
+			self.Label.TextColor3 = t.SubText
+		end
+		self.Indicator.BackgroundColor3 = t.Accent
+	end)
+
+	self.Empty = textLabel(frame, {
+		Size = UDim2.new(1, 0, 0, 28), Text = "No settings match your search.",
+		TextSize = 12, TextColor3 = win._theme.SubText, Visible = false, ZIndex = 3,
+	})
+	win:_color(self.Empty, "TextColor3", "SubText")
+end
+
+function Tab:_markActive(active)
+	self._active = active
+	if self.Indicator then self.Indicator.Visible = active end
+	if self.Button then self.Button.BackgroundTransparency = active and 0 or 1 end
+	if self.Label then
+		self.Label.TextColor3 = active and self.Window._theme.Text or self.Window._theme.SubText
+	end
+end
+
+function Tab:_filter(query)
+	local q = string.lower(tostring(query or ""))
+	local shown = 0
+	for _, comp in ipairs(self.Components) do
+		if comp.Frame then
+			local match = q == "" or string.find(string.lower(tostring(comp.Title or "")), q, 1, true) ~= nil
+			comp.Frame.Visible = match
+			if match then shown = shown + 1 end
+		end
+	end
+	for _, section in ipairs(self.Sections) do
+		local any = false
+		for _, child in ipairs(section.Body:GetChildren()) do
+			if child:IsA("GuiObject") and child.Visible then any = true break end
+		end
+		section.Frame.Visible = any
+	end
+	return shown
+end
+
+function Tab:AddSection(a, b)
+	local cfg = type(a) == "table" and a or { Title = a }
+	local section = setmetatable({
+		Tab = self, Title = cfg.Title or "", Columns = tonumber(cfg.Columns) or 1,
+		Components = {},
+	}, Section)
+	section:_build()
+	self.Sections[#self.Sections + 1] = section
+	return section
+end
+
+function Tab:_ensureDefault()
+	if not self._default then self._default = self:AddSection({ Title = "" }) end
+	return self._default
+end
+
+function Tab:AddButton(a, b) return self:_ensureDefault():AddButton(a, b) end
+function Tab:AddToggle(a, b, c) return self:_ensureDefault():AddToggle(a, b, c) end
+function Tab:AddSlider(a, b, c, d, e) return self:_ensureDefault():AddSlider(a, b, c, d, e) end
+function Tab:AddTextbox(a, b, c) return self:_ensureDefault():AddTextbox(a, b, c) end
+function Tab:AddDropdown(a, b, c, d) return self:_ensureDefault():AddDropdown(a, b, c, d) end
+function Tab:AddColorPicker(a, b) return self:_ensureDefault():AddColorPicker(a, b) end
+function Tab:AddKeybind(a, b, c) return self:_ensureDefault():AddKeybind(a, b, c) end
+function Tab:AddLabel(a) return self:_ensureDefault():AddLabel(a) end
+function Tab:AddParagraph(a) return self:_ensureDefault():AddParagraph(a) end
+function Tab:AddDivider() return self:_ensureDefault():AddDivider() end
+
+--============================================================================
+--  SECTION
+--============================================================================
+Section = {}
+Section.__index = Section
+
+function Section:_build()
+	local win = self.Tab.Window
+	local frame = make("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
+	}, self.Tab.Frame)
+	make("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, frame)
+	if self.Title ~= "" then
+		local header = textLabel(frame, {
+			Size = UDim2.new(1, 0, 0, 15), Text = string.upper(self.Title),
+			Font = FONT_BOLD, TextSize = 11, ZIndex = 3,
+		})
+		win:_color(header, "TextColor3", "SubText")
+		self.Header = header
+	end
+	local body = make("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 2,
+	}, frame)
+	if self.Columns > 1 then
+		local gap = 8
+		make("UIGridLayout", {
+			CellSize = UDim2.new(1 / self.Columns, -((self.Columns - 1) * gap) / self.Columns, 0, 42),
+			CellPadding = UDim2.fromOffset(gap, gap), SortOrder = Enum.SortOrder.LayoutOrder,
+		}, body)
+	else
+		make("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+	end
+	self.Frame = frame
+	self.Body = body
+end
+
+function Section:_card(height, clickable)
+	local win = self.Tab.Window
+	local props = {
+		BackgroundColor3 = win._theme.SurfaceAlt, BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, height or 42), ClipsDescendants = true, ZIndex = 2,
+	}
+	if clickable then
+		props.Text = ""
+		props.AutoButtonColor = false
+	end
+	local row = make(clickable and "TextButton" or "Frame", props, self.Body)
+	corner(row, 6)
+	win:_color(row, "BackgroundColor3", "SurfaceAlt")
+	if UserInputService.MouseEnabled then
+		win:_connect(row.MouseEnter, function()
+			if row.Visible then tween(row, 0.12, { BackgroundColor3 = win._theme.SurfaceHover }) end
+		end)
+		win:_connect(row.MouseLeave, function()
+			if row.Visible then tween(row, 0.16, { BackgroundColor3 = win._theme.SurfaceAlt }) end
+		end)
+	end
+	return row
+end
+
+function Section:_title(row, rightWidth, text)
+	local win = self.Tab.Window
+	local label = textLabel(row, {
+		Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -(rightWidth + 24), 1, 0),
+		Text = tostring(text or ""), TextSize = 14, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 3,
+	})
+	win:_color(label, "TextColor3", "Text")
+	return label
+end
+
+function Section:_right(row, width, height)
+	return make("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(width, height or 24), BackgroundTransparency = 1, ZIndex = 3,
+	}, row)
+end
+
+function Section:_add(comp, cfg)
+	register(self.Tab, comp, cfg)
+	return comp
+end
+
+--============================================================================
+--  COMPONENT BASE
+--============================================================================
+Component = {}
+Component.__index = Component
+
+function Component:Get() return self._value end
+
+function Component:SetEnabled(enabled)
+	self._enabled = enabled ~= false
+	if self.Frame then self.Frame.Active = self._enabled end
+	if self.TitleLabel then self.TitleLabel.TextTransparency = self._enabled and 0 or 0.45 end
+	return self
+end
+
+function Component:Destroy()
+	if self.Frame then self.Frame:Destroy() end
+end
+
+register = function(tab, comp, cfg)
+	local win = tab.Window
+	comp.Window = win
+	comp.Title = cfg.Title or comp.Title or ""
+	comp.Description = cfg.Description
+	-- keybinds derive a flag from their title when none is given; do not erase it
+	comp.Flag = cfg.Flag or comp.Flag
+	comp._callback = cfg.Callback
+	comp._enabled = true
+	tab.Components[#tab.Components + 1] = comp
+	if cfg.Flag then
+		win._flags[cfg.Flag] = comp
+		local ok, value = pcall(comp.Get, comp)
+		if ok then win.Flags[cfg.Flag] = value end
+	end
+	if cfg.Description and cfg.Description ~= "" and UserInputService.MouseEnabled then
+		win:_connect(comp.Frame.MouseEnter, function() Vega:_tooltip(comp) end)
+		win:_connect(comp.Frame.MouseLeave, function() Vega:_tooltip(nil) end)
+	end
+	return comp
+end
+
+--============================================================================
+--  BUTTON
+--============================================================================
+function Section:AddButton(a, b)
+	local cfg = type(a) == "table" and a or { Title = a, Callback = b }
+	local win = self.Tab.Window
+	local row = self:_card(42, true)
+	local title = self:_title(row, 44, cfg.Title)
+	local right = self:_right(row, 34, 18)
+	local runLabel = textLabel(right, {
+		Size = UDim2.fromScale(1, 1), Text = cfg.Danger and "!" or "Run", Font = FONT_BOLD,
+		TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 3,
+	})
+	win:_color(runLabel, "TextColor3", cfg.Danger and "Bad" or "Accent")
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _enabled = true, _last = 0, _callback = cfg.Callback,
+	}, Component)
+	function comp:SetText(value)
+		self.Title = tostring(value or "")
+		title.Text = self.Title
+	end
+	row.Activated:Connect(function()
+		if comp._enabled == false then return end
+		local now = os.clock()
+		if now - comp._last < 0.3 then return end
+		comp._last = now
+		tween(row, 0.06, { BackgroundColor3 = win._theme.Accent })
+		task.delay(0.12, function()
+			if row.Parent then tween(row, 0.2, { BackgroundColor3 = win._theme.SurfaceAlt }) end
+		end)
+		if cfg.Confirm then
+			Vega:Dialog({
+				Title = tostring(cfg.Confirm), Content = cfg.ConfirmText or "Are you sure?",
+				Buttons = {
+					{ Text = "Cancel" },
+					{ Text = "Confirm", Primary = true, Callback = function()
+						if comp._enabled ~= false and cfg.Callback then pcall(cfg.Callback, comp) end
+					end },
+				},
+			})
+		elseif cfg.Callback then
+			local ok, err = pcall(cfg.Callback, comp)
+			if not ok then warn("[Vega] button callback: " .. tostring(err)) end
+		end
+	end)
+	return self:_add(comp, cfg)
+end
+
+--============================================================================
+--  TOGGLE
+--============================================================================
+function Section:AddToggle(a, b, c)
+	local cfg = type(a) == "table" and a or { Title = a, Default = b, Callback = c }
+	local win = self.Tab.Window
+	local row = self:_card(42, true)
+	local title = self:_title(row, 48, cfg.Title)
+	local right = self:_right(row, 40, 22)
+	local switch = make("Frame", {
+		Size = UDim2.fromOffset(40, 22), AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = win._theme.SurfaceAlt, ZIndex = 3,
+	}, right)
+	corner(switch, 11)
+	win:_stroke(switch)
+	local knob = make("Frame", {
+		Size = UDim2.fromOffset(16, 16), Position = UDim2.fromOffset(3, 3),
+		BackgroundColor3 = win._theme.AccentText, ZIndex = 4,
+	}, switch)
+	corner(knob, 8)
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _value = false, _enabled = true, _callback = cfg.Callback,
+	}, Component)
+	function comp:Set(value, silent)
+		value = value == true
+		self._value = value
+		tween(knob, 0.15, { Position = UDim2.fromOffset(value and 21 or 3, 3) })
+		switch.BackgroundColor3 = value and win._theme.Accent or win._theme.SurfaceAlt
+		win:_flag(self, value)
+		if not silent and self._callback then
+			local ok, err = pcall(self._callback, value, self)
+			if not ok then warn("[Vega] toggle callback: " .. tostring(err)) end
+		end
+	end
+	function comp:Get() return self._value end
+	win:_themeFn(function(t)
+		switch.BackgroundColor3 = comp._value and t.Accent or t.SurfaceAlt
+		knob.BackgroundColor3 = t.AccentText
+	end)
+	row.Activated:Connect(function()
+		if comp._enabled ~= false then comp:Set(not comp._value) end
+	end)
+	self:_add(comp, cfg)
+	comp:Set(cfg.Default == true, true)
+	return comp
+end
+
+--============================================================================
+--  SLIDER
+--============================================================================
+function Section:AddSlider(a, b, c, d, e)
+	local cfg = type(a) == "table" and a or { Title = a, Min = b, Max = c, Default = d, Callback = e }
+	cfg.Min = tonumber(cfg.Min) or 0
+	cfg.Max = tonumber(cfg.Max) or 100
+	if cfg.Max <= cfg.Min then cfg.Max = cfg.Min + 1 end
+	local win = self.Tab.Window
+	local row = self:_card(56, false)
+	local title = self:_title(row, 92, cfg.Title)
+	title.Size = UDim2.new(1, -104, 0, 20)
+	title.Position = UDim2.fromOffset(10, 6)
+	local valueLabel = textLabel(row, {
+		Position = UDim2.new(1, -92, 0, 6), Size = UDim2.fromOffset(82, 20),
+		Text = "", TextSize = 12, TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 3,
+	})
+	win:_color(valueLabel, "TextColor3", "SubText")
+	local track = make("Frame", {
+		Position = UDim2.fromOffset(10, 38), Size = UDim2.new(1, -20, 0, 6),
+		BackgroundColor3 = win._theme.Stroke, BorderSizePixel = 0, ZIndex = 3,
+	}, row)
+	corner(track, 3)
+	win:_color(track, "BackgroundColor3", "Stroke")
+	local fill = make("Frame", {
+		Size = UDim2.fromScale(0, 1), BackgroundColor3 = win._theme.Accent,
+		BorderSizePixel = 0, ZIndex = 4,
+	}, track)
+	corner(fill, 3)
+	win:_color(fill, "BackgroundColor3", "Accent")
+	local knob = make("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.fromOffset(14, 14), BackgroundColor3 = win._theme.Accent,
+		BorderSizePixel = 0, ZIndex = 5,
+	}, track)
+	corner(knob, 7)
+	win:_color(knob, "BackgroundColor3", "Accent")
+	local hit = make("Frame", {
+		Position = UDim2.fromOffset(4, 26), Size = UDim2.new(1, -8, 0, 26),
+		BackgroundTransparency = 1, Active = true, ZIndex = 6,
+	}, row)
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _value = cfg.Min, _enabled = true, _callback = cfg.Callback,
+	}, Component)
+	local function snap(value)
+		value = math.clamp(tonumber(value) or cfg.Min, cfg.Min, cfg.Max)
+		if cfg.Step and cfg.Step > 0 then
+			value = cfg.Min + math.floor((value - cfg.Min) / cfg.Step + 0.5) * cfg.Step
+		end
+		local decimals = cfg.Decimals or 0
+		local factor = 10 ^ decimals
+		return math.floor(value * factor + 0.5) / factor
+	end
+	local function display(value)
+		if cfg.Format then
+			local ok, formatted = pcall(cfg.Format, value)
+			if ok then return tostring(formatted) end
+		end
+		local decimals = cfg.Decimals or 0
+		local shown
+		if decimals > 0 then shown = string.format("%." .. decimals .. "f", value)
+		else shown = tostring(math.floor(value + 0.5)) end
+		return shown .. tostring(cfg.Suffix or "")
+	end
+	local function paint()
+		local ratio = math.clamp((comp._value - cfg.Min) / (cfg.Max - cfg.Min), 0, 1)
+		fill.Size = UDim2.new(ratio, 0, 1, 0)
+		knob.Position = UDim2.new(ratio, 0, 0.5, 0)
+		valueLabel.Text = display(comp._value)
+	end
+	function comp:Set(value, silent)
+		self._value = snap(value)
+		paint()
+		win:_flag(self, self._value)
+		if not silent and self._callback then
+			local ok, err = pcall(self._callback, self._value, self)
+			if not ok then warn("[Vega] slider callback: " .. tostring(err)) end
+		end
+	end
+	function comp:Get() return self._value end
+	local dragging = false
+	local function fromX(px)
+		local width = track.AbsoluteSize.X
+		if width <= 0 then return end
+		local ratio = math.clamp((px - track.AbsolutePosition.X) / width, 0, 1)
+		comp:Set(cfg.Min + (cfg.Max - cfg.Min) * ratio)
+	end
+	if hit then
+		hit.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				fromX(input.Position.X)
+			end
+		end)
+	end
+	win:_connect(UserInputService.InputChanged, function(input)
+		if not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			fromX(input.Position.X)
+		end
+	end)
+	win:_connect(UserInputService.InputEnded, function(input)
+		if not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+			if cfg.CallbackEnd then pcall(cfg.CallbackEnd, comp._value, comp) end
+		end
+	end)
+	self:_add(comp, cfg)
+	comp:Set(cfg.Default or cfg.Min, true)
+	return comp
+end
+
+--============================================================================
+--  TEXTBOX
+--============================================================================
+function Section:AddTextbox(a, b, c)
+	local cfg = type(a) == "table" and a or { Title = a, Placeholder = b, Callback = c }
+	local win = self.Tab.Window
+	local row = self:_card(60, false)
+	local title = self:_title(row, 20, cfg.Title)
+	title.Size = UDim2.new(1, -20, 0, 20)
+	title.Position = UDim2.fromOffset(10, 5)
+	local box = make("TextBox", {
+		Position = UDim2.fromOffset(10, 28), Size = UDim2.new(1, -20, 0, 26),
+		BackgroundColor3 = win._theme.Surface, BorderSizePixel = 0, Font = FONT,
+		TextSize = 12, Text = tostring(cfg.Default or ""), PlaceholderText = cfg.Placeholder or "",
+		PlaceholderColor3 = win._theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false, ZIndex = 3,
+	}, row)
+	corner(box, 4)
+	pad(box, 0, 8, 0, 8)
+	win:_color(box, "BackgroundColor3", "Surface")
+	win:_color(box, "TextColor3", "Text")
+	win:_color(box, "PlaceholderColor3", "SubText")
+	local updating = false
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _value = cfg.Default, _enabled = true, _callback = cfg.Callback,
+	}, Component)
+	local function commit()
+		local text = box.Text
+		local value = text
+		if cfg.Numeric then
+			local number = tonumber(text)
+			if number == nil then
+				box.Text = tostring(comp._value or "")
+				return
+			end
+			value = number
+		end
+		comp._value = value
+		win:_flag(comp, value)
+		if not updating and comp._callback then
+			local ok, err = pcall(comp._callback, value, comp)
+			if not ok then warn("[Vega] textbox callback: " .. tostring(err)) end
+		end
+	end
+	function comp:Set(value, silent)
+		self._value = value
+		updating = true
+		box.Text = tostring(value or "")
+		updating = false
+		win:_flag(self, value)
+		if not silent and self._callback then pcall(self._callback, value, self) end
+	end
+	function comp:Get() return self._value end
+	box.FocusLost:Connect(commit)
+	if cfg.Live then
+		box:GetPropertyChangedSignal("Text"):Connect(function()
+			if not updating then commit() end
+		end)
+	end
+	self:_add(comp, cfg)
+	comp:Set(cfg.Default, true)
+	return comp
+end
+
+--============================================================================
+--  DROPDOWN (searchable, single or multi)
+--============================================================================
+function Section:AddDropdown(a, b, c, d)
+	local cfg = type(a) == "table" and a or { Title = a, Options = b, Default = c, Callback = d }
+	local options = {}
+	for _, option in ipairs(cfg.Options or {}) do options[#options + 1] = tostring(option) end
+	cfg.Options = options
+	local win = self.Tab.Window
+	local row = self:_card(42, true)
+	local title = self:_title(row, 168, cfg.Title)
+	local selected = textLabel(row, {
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -28, 0.5, 0),
+		Size = UDim2.fromOffset(132, 20), Text = "Select", TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 3,
+	})
+	win:_color(selected, "TextColor3", "SubText")
+	win:_color(textLabel(row, {
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(12, 16), Text = "v", TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Right, ZIndex = 3,
+	}), "TextColor3", "SubText")
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _enabled = true, _callback = cfg.Callback,
+		_value = cfg.Multi and {} or nil,
+	}, Component)
+	local panel, items, outside
+	local refreshItems = function() end
+	local filterItems = function() end
+	local closePanel
+	closePanel = function()
+		if outside then pcall(function() outside:Disconnect() end) outside = nil end
+		if panel then pcall(function() panel:Destroy() end) panel = nil end
+		items = nil
+	end
+	refreshItems = function()
+		if not items then return end
+		for _, entry in ipairs(items) do
+			local isSelected = false
+			if cfg.Multi then
+				for _, value in ipairs(comp._value) do
+					if value == entry.option then isSelected = true break end
+				end
+			else
+				isSelected = comp._value == entry.option
+			end
+			entry.dot.Visible = isSelected
+		end
+	end
+	filterItems = function(query)
+		if not items then return end
+		local q = string.lower(tostring(query or ""))
+		for _, entry in ipairs(items) do
+			entry.button.Visible = q == "" or string.find(string.lower(entry.option), q, 1, true) ~= nil
+		end
+	end
+	function comp:Set(value, silent)
+		if cfg.Multi then
+			local list = {}
+			if type(value) == "table" then
+				for _, candidate in ipairs(value) do
+					for _, option in ipairs(options) do
+						if option == candidate then list[#list + 1] = option break end
+					end
+				end
+			end
+			self._value = list
+			if #list == 0 then selected.Text = "Select"
+			elseif #list <= 2 then selected.Text = table.concat(list, ", ")
+			else selected.Text = list[1] .. ", " .. list[2] .. " +" .. tostring(#list - 2) end
+		else
+			local valid = nil
+			for _, option in ipairs(options) do
+				if option == value then valid = option break end
+			end
+			self._value = valid
+			selected.Text = valid or "Select"
+		end
+		refreshItems()
+		win:_flag(self, self._value)
+		if not silent and self._callback then
+			local ok, err = pcall(self._callback, self._value, self)
+			if not ok then warn("[Vega] dropdown callback: " .. tostring(err)) end
+		end
+	end
+	function comp:Get() return self._value end
+	local function openPanel()
+		if panel and panel.Parent then closePanel() return end
+		win:_closePanels()
+		local vp = viewportSize()
+		local rowPos, rowSize = row.AbsolutePosition, row.AbsoluteSize
+		local width = math.clamp(rowSize.X, 180, 280)
+		local searchable = cfg.Searchable ~= false and #options > 5
+		local searchHeight = searchable and 34 or 0
+		local visibleCount = math.max(1, math.min(#options, 6))
+		local height = math.min(250, 10 + searchHeight + visibleCount * 30)
+		local x = math.clamp(rowPos.X, 8, math.max(8, vp.X - width - 8))
+		local y = rowPos.Y + rowSize.Y + 4
+		if y + height > vp.Y - 8 then y = rowPos.Y - height - 4 end
+		if y < 8 then y = 8 end
+		panel = make("Frame", {
+			Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(width, height),
+			BackgroundColor3 = win._theme.Surface, BorderSizePixel = 0, ClipsDescendants = true,
+			ZIndex = 500, Active = true,
+		}, win._gui)
+		corner(panel, 8)
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = win._theme.Stroke
+		stroke.Parent = panel
+		local listY = 5 + searchHeight
+		if searchable then
+			local box = make("TextBox", {
+				Position = UDim2.fromOffset(8, 5), Size = UDim2.new(1, -16, 0, 26),
+				BackgroundColor3 = win._theme.SurfaceAlt, BorderSizePixel = 0, Font = FONT,
+				TextSize = 12, Text = "", PlaceholderText = "Search",
+				PlaceholderColor3 = win._theme.SubText, ClearTextOnFocus = false, ZIndex = 502,
+			}, panel)
+			corner(box, 5)
+			pad(box, 0, 8, 0, 8)
+			box:GetPropertyChangedSignal("Text"):Connect(function() filterItems(box.Text) end)
+		end
+		local list = make("ScrollingFrame", {
+			Position = UDim2.fromOffset(6, listY), Size = UDim2.new(1, -12, 1, -(listY + 6)),
+			BackgroundTransparency = 1, BorderSizePixel = 0, CanvasSize = UDim2.new(0, 0, 0, 0),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+			ScrollingDirection = Enum.ScrollingDirection.Y, ZIndex = 501,
+		}, panel)
+		make("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+		items = {}
+		for index, option in ipairs(options) do
+			local item = make("TextButton", {
+				Size = UDim2.new(1, 0, 0, 28), BackgroundColor3 = win._theme.SurfaceAlt,
+				BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 502,
+			}, list)
+			local label = textLabel(item, {
+				Position = UDim2.fromOffset(9, 0), Size = UDim2.new(1, -30, 1, 0),
+				Text = option, TextSize = 12, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 503,
+			})
+			win:_color(label, "TextColor3", "Text")
+			local dot = make("Frame", {
+				AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -9, 0.5, 0),
+				Size = UDim2.fromOffset(7, 7), BackgroundColor3 = win._theme.Accent,
+				BorderSizePixel = 0, Visible = false, ZIndex = 503,
+			}, item)
+			corner(dot, 4)
+			win:_color(dot, "BackgroundColor3", "Accent")
+			item.MouseEnter:Connect(function() item.BackgroundTransparency = 0 end)
+			item.MouseLeave:Connect(function() item.BackgroundTransparency = 1 end)
+			item.Activated:Connect(function()
+				if cfg.Multi then
+					local nextValue = {}
+					local found = false
+					for _, value in ipairs(comp._value) do
+						if value == option then found = true else nextValue[#nextValue + 1] = value end
+					end
+					if not found then nextValue[#nextValue + 1] = option end
+					comp:Set(nextValue)
+				else
+					comp:Set(option)
+					closePanel()
+				end
+			end)
+			items[index] = { button = item, dot = dot, option = option }
+		end
+		refreshItems()
+		outside = UserInputService.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+			if not panel then return end
+			local p = input.Position
+			local a, s = panel.AbsolutePosition, panel.AbsoluteSize
+			if p.X < a.X or p.X > a.X + s.X or p.Y < a.Y or p.Y > a.Y + s.Y then closePanel() end
+		end)
+		win:_registerPanel(closePanel)
+	end
+	row.Activated:Connect(function()
+		if comp._enabled ~= false then openPanel() end
+	end)
+	self:_add(comp, cfg)
+	comp:Set(cfg.Default, true)
+	return comp
+end
+
+--============================================================================
+--  COLOR PICKER
+--============================================================================
+function Section:AddColorPicker(a, b)
+	local cfg = type(a) == "table" and a or { Title = a, Default = b }
+	local win = self.Tab.Window
+	local row = self:_card(42, true)
+	local title = self:_title(row, 40, cfg.Title)
+	local swatch = make("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.fromOffset(24, 24), BackgroundColor3 = cfg.Default or win._theme.Accent,
+		BorderSizePixel = 0, ZIndex = 3,
+	}, row)
+	corner(swatch, 5)
+	win:_stroke(swatch)
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description, Flag = cfg.Flag,
+		Frame = row, TitleLabel = title, _color = cfg.Default or win._theme.Accent,
+		_enabled = true, _callback = cfg.Callback,
+	}, Component)
+	local panel, padArea, hue, preview, hexBox, marker, hueMarker
+	local h, s, v = comp._color:ToHSV()
+	local draggingPad, draggingHue = false, false
+	local refresh = function() end
+	local closePanel
+	closePanel = function()
+		if panel then pcall(function() panel:Destroy() end) panel = nil end
+		padArea, hue, preview, hexBox, marker, hueMarker = nil, nil, nil, nil, nil, nil
+	end
+	refresh = function()
+		if not panel or not panel.Parent then return end
+		padArea.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		preview.BackgroundColor3 = Color3.fromHSV(h, s, v)
+		hexBox.Text = "#" .. comp._color:ToHex()
+		marker.Position = UDim2.new(s, 0, 1 - v, 0)
+		hueMarker.Position = UDim2.new(h, 0, 0, 0)
+	end
+	function comp:Set(color, silent)
+		if typeof(color) ~= "Color3" then return end
+		self._color = color
+		h, s, v = color:ToHSV()
+		swatch.BackgroundColor3 = color
+		refresh()
+		win:_flag(self, color)
+		if not silent and self._callback then
+			local ok, err = pcall(self._callback, color, self)
+			if not ok then warn("[Vega] color callback: " .. tostring(err)) end
+		end
+	end
+	function comp:Get() return self._color end
+	local function pickPad(position)
+		if not padArea then return end
+		local a, size = padArea.AbsolutePosition, padArea.AbsoluteSize
+		if size.X <= 0 or size.Y <= 0 then return end
+		s = math.clamp((position.X - a.X) / size.X, 0, 1)
+		v = 1 - math.clamp((position.Y - a.Y) / size.Y, 0, 1)
+		comp:Set(Color3.fromHSV(h, s, v))
+	end
+	local function pickHue(position)
+		if not hue then return end
+		local a, size = hue.AbsolutePosition, hue.AbsoluteSize
+		if size.X <= 0 then return end
+		h = math.clamp((position.X - a.X) / size.X, 0, 1)
+		comp:Set(Color3.fromHSV(h, s, v))
+	end
+	local function openPanel()
+		if panel and panel.Parent then closePanel() return end
+		win:_closePanels()
+		local vp = viewportSize()
+		local rowPos, rowSize = row.AbsolutePosition, row.AbsoluteSize
+		local width, height = 232, 250
+		local x = math.clamp(rowPos.X, 8, math.max(8, vp.X - width - 8))
+		local y = rowPos.Y + rowSize.Y + 4
+		if y + height > vp.Y - 8 then y = rowPos.Y - height - 4 end
+		if y < 8 then y = 8 end
+		panel = make("Frame", {
+			Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(width, height),
+			BackgroundColor3 = win._theme.Surface, BorderSizePixel = 0, ClipsDescendants = true,
+			ZIndex = 500, Active = true,
+		}, win._gui)
+		corner(panel, 8)
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = win._theme.Stroke
+		stroke.Parent = panel
+		textLabel(panel, {
+			Position = UDim2.fromOffset(16, 8), Size = UDim2.new(1, -32, 0, 16),
+			Text = "Colour", Font = FONT_BOLD, TextSize = 12, ZIndex = 501,
+		})
+		padArea = make("Frame", {
+			Position = UDim2.fromOffset(16, 30), Size = UDim2.fromOffset(200, 110),
+			BackgroundColor3 = Color3.fromHSV(h, 1, 1), BorderSizePixel = 0,
+			Active = true, ClipsDescendants = true, ZIndex = 501,
+		}, panel)
+		corner(padArea, 4)
+		local white = make("Frame", {
+			Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 502,
+		}, padArea)
+		local gw = Instance.new("UIGradient")
+		gw.Color = ColorSequence.new(Color3.new(1, 1, 1))
+		gw.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+		gw.Rotation = 0
+		gw.Parent = white
+		local black = make("Frame", {
+			Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), ZIndex = 503,
+		}, padArea)
+		local gb = Instance.new("UIGradient")
+		gb.Color = ColorSequence.new(Color3.new(0, 0, 0))
+		gb.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+		gb.Rotation = 90
+		gb.Parent = black
+		marker = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(10, 10),
+			BackgroundTransparency = 1, ZIndex = 505,
+		}, padArea)
+		corner(marker, 5)
+		local ms = Instance.new("UIStroke")
+		ms.Thickness = 2
+		ms.Color = Color3.new(1, 1, 1)
+		ms.Parent = marker
+		hue = make("Frame", {
+			Position = UDim2.fromOffset(16, 150), Size = UDim2.fromOffset(200, 12),
+			BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Active = true, ZIndex = 501,
+		}, panel)
+		corner(hue, 6)
+		local gh = Instance.new("UIGradient")
+		gh.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+			ColorSequenceKeypoint.new(1 / 6, Color3.fromHSV(1 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(2 / 6, Color3.fromHSV(2 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(3 / 6, Color3.fromHSV(3 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(4 / 6, Color3.fromHSV(4 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(5 / 6, Color3.fromHSV(5 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1)),
+		})
+		gh.Parent = hue
+		hueMarker = make("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0), Size = UDim2.fromOffset(4, 12),
+			BackgroundColor3 = Color3.new(1, 1, 1), ZIndex = 504,
+		}, hue)
+		corner(hueMarker, 2)
+		preview = make("Frame", {
+			Position = UDim2.fromOffset(16, 174), Size = UDim2.fromOffset(28, 28),
+			BackgroundColor3 = comp._color, BorderSizePixel = 0, ZIndex = 502,
+		}, panel)
+		corner(preview, 5)
+		hexBox = make("TextBox", {
+			Position = UDim2.fromOffset(52, 176), Size = UDim2.fromOffset(100, 26),
+			BackgroundColor3 = win._theme.SurfaceAlt, BorderSizePixel = 0, Font = FONT,
+			TextSize = 12, Text = "#" .. comp._color:ToHex(), ClearTextOnFocus = false, ZIndex = 502,
+		}, panel)
+		corner(hexBox, 5)
+		pad(hexBox, 0, 8, 0, 8)
+		hexBox.FocusLost:Connect(function()
+			local text = tostring(hexBox.Text):gsub("#", "")
+			if #text == 6 then
+				local ok, color = pcall(Color3.fromHex, text)
+				if ok then comp:Set(color) end
+			end
+			refresh()
+		end)
+		local done = textButton(panel, {
+			Position = UDim2.fromOffset(160, 210), Size = UDim2.fromOffset(56, 26),
+			BackgroundColor3 = win._theme.Accent, Text = "Done", TextSize = 12,
+			TextColor3 = win._theme.AccentText, ZIndex = 502,
+		}, "")
+		corner(done, 5)
+		done.Activated:Connect(closePanel)
+		padArea.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				draggingPad = true
+				pickPad(input.Position)
+			end
+		end)
+		hue.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				draggingHue = true
+				pickHue(input.Position)
+			end
+		end)
+		local outside = UserInputService.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+			if not panel then return end
+			local p = input.Position
+			local a, sz = panel.AbsolutePosition, panel.AbsoluteSize
+			if p.X < a.X or p.X > a.X + sz.X or p.Y < a.Y or p.Y > a.Y + sz.Y then closePanel() end
+		end)
+		win:_registerPanel(function()
+			if outside then pcall(function() outside:Disconnect() end) outside = nil end
+			closePanel()
+		end)
+		refresh()
+	end
+	win:_connect(UserInputService.InputChanged, function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if draggingPad then pickPad(input.Position)
+		elseif draggingHue then pickHue(input.Position) end
+	end)
+	win:_connect(UserInputService.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			draggingPad, draggingHue = false, false
+		end
+	end)
+	row.Activated:Connect(function()
+		if comp._enabled ~= false then openPanel() end
+	end)
+	self:_add(comp, cfg)
+	comp:Set(comp._color, true)
+	return comp
+end
+
+--============================================================================
+--  KEYBIND
+--============================================================================
+function Section:AddKeybind(a, b, c)
+	local cfg = type(a) == "table" and a or { Title = a, Default = b, Callback = c }
+	local win = self.Tab.Window
+	local row = self:_card(42, true)
+	local title = self:_title(row, 100, cfg.Title)
+	local right = self:_right(row, 92, 24)
+	local pill = make("Frame", {
+		Size = UDim2.fromOffset(92, 24), AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = win._theme.Surface, ZIndex = 3,
+	}, right)
+	corner(pill, 5)
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Color = win._theme.Stroke
+	stroke.Parent = pill
+	local label = textLabel(pill, {
+		Size = UDim2.fromScale(1, 1), Text = "None", TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Center, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 4,
+	})
+	win:_color(label, "TextColor3", "SubText")
+	local comp = setmetatable({
+		Window = win, Title = cfg.Title or "", Description = cfg.Description,
+		Flag = cfg.Flag or ("bind." .. tostring(cfg.Title or "key")),
+		Mode = cfg.Mode or "Toggle", Frame = row, TitleLabel = title,
+		_key = nil, _enabled = true, _callback = cfg.Callback,
+	}, Component)
+	function comp:Set(key, silent)
+		key = normalizeKey(key)
+		self._key = key
+		label.Text = key and key.Name or "None"
+		label.TextColor3 = key and win._theme.Text or win._theme.SubText
+		stroke.Color = win._theme.Stroke
+		win:_flag(self, key)
+	end
+	function comp:Get() return self._key end
+	function comp:_fire(pressed)
+		if self._enabled == false then return end
+		if self.Mode ~= "Hold" and pressed ~= true then return end
+		if self._callback then
+			local ok, err = pcall(self._callback, pressed, self)
+			if not ok then warn("[Vega] keybind callback: " .. tostring(err)) end
+		end
+	end
+	function comp:_cancelListen()
+		label.Text = self._key and self._key.Name or "None"
+		stroke.Color = win._theme.Stroke
+	end
+	row.Activated:Connect(function()
+		if comp._enabled == false then return end
+		win._listeningBind = comp
+		label.Text = "Press a key"
+		stroke.Color = win._theme.Accent
+	end)
+	win:_themeFn(function(t)
+		if win._listeningBind ~= comp then
+			stroke.Color = t.Stroke
+			if comp._key then label.TextColor3 = t.Text else label.TextColor3 = t.SubText end
+		end
+	end)
+	win._binds[#win._binds + 1] = comp
+	self:_add(comp, cfg)
+	comp:Set(cfg.Default, true)
+	return comp
+end
+
+--============================================================================
+--  LABEL / PARAGRAPH / DIVIDER
+--============================================================================
+function Section:AddLabel(a)
+	local cfg = type(a) == "table" and a or { Title = tostring(a or "") }
+	local win = self.Tab.Window
+	local frame = make("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20), ZIndex = 2,
+	}, self.Body)
+	local label = textLabel(frame, {
+		Size = UDim2.new(1, 0, 1, 0), Text = tostring(cfg.Title or ""),
+		TextSize = 12, RichText = cfg.RichText == true, ZIndex = 3,
+	})
+	win:_color(label, "TextColor3", "SubText")
+	local comp = setmetatable({
+		Window = win, Title = tostring(cfg.Title or ""), Description = cfg.Description,
+		Flag = cfg.Flag, Frame = frame, TitleLabel = label, _enabled = true,
+	}, Component)
+	function comp:Set(text)
+		self.Title = tostring(text or "")
+		label.Text = self.Title
+	end
+	return self:_add(comp, cfg)
+end
+
+function Section:AddParagraph(a)
+	local cfg = type(a) == "table" and a or { Title = tostring(a or "") }
+	local win = self.Tab.Window
+	local label = textLabel(self.Body, {
+		Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+		Text = tostring(cfg.Title or ""), TextWrapped = true, TextSize = 12,
+		RichText = cfg.RichText == true, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 3,
+	})
+	win:_color(label, "TextColor3", "SubText")
+	local comp = setmetatable({
+		Window = win, Title = tostring(cfg.Title or ""), Description = cfg.Description,
+		Flag = cfg.Flag, Frame = label, TitleLabel = label, _enabled = true,
+	}, Component)
+	function comp:Set(text)
+		self.Title = tostring(text or "")
+		label.Text = self.Title
+	end
+	return self:_add(comp, cfg)
+end
+
+function Section:AddDivider()
+	local win = self.Tab.Window
+	local line = make("Frame", {
+		Size = UDim2.new(1, -4, 0, 1), BackgroundColor3 = win._theme.Stroke,
+		BorderSizePixel = 0, ZIndex = 2,
+	}, self.Body)
+	win:_color(line, "BackgroundColor3", "Stroke")
+	local comp = setmetatable({
+		Window = win, Title = "Divider", Frame = line, _enabled = true,
+	}, Component)
+	return self:_add(comp, { Title = "Divider" })
+end
+
+-- Running this file on its own publishes the library, so a second script can
+-- do `local Vega = getgenv().Vega` instead of reading and loading the file again.
+pcall(function()
+	local env = (type(getgenv) == "function" and getgenv()) or _G
+	if type(env) == "table" then env.Vega = Vega end
+end)
+
+return Vega
+end)()
+
+local Farm = (function()
+--============================================================================
 --  ATTACK ON TITAN REVOLUTION  |  DELTA AUTO-FARM  |  Vega UI
 --  place 14638336319            build 2026-11-04            version 3.0
 --============================================================================
@@ -3822,4 +6221,7 @@ if UI.win then
 end
 
 say("ready - F5 farm, F6 napes, F7 panic. _G.AOTR_DELTA for the API.")
+return Farm
+end)()
+
 return Farm
